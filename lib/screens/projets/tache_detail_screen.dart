@@ -6,9 +6,7 @@ import 'package:jprojets/models/tache.dart';
 import 'package:jprojets/models/sous_tache.dart';
 import 'package:jprojets/services/database_service.dart';
 import 'package:jprojets/theme/app_theme.dart';
-import 'package:jprojets/widgets/checklist_widget.dart';
 import 'package:jprojets/widgets/link_actions_bottom_sheet.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class TacheDetailScreen extends StatefulWidget {
   final DatabaseService databaseService;
@@ -242,20 +240,6 @@ class _TacheDetailScreenState extends State<TacheDetailScreen> {
     }
   }
 
-  Future<void> _mettreAJourChecklist(List<String> items) async {
-    setState(() => _isLoading = true);
-    try {
-      await widget.databaseService.updateTache(
-        projetId: widget.projetId,
-        tacheId: widget.tacheId,
-        checklist: items,
-      );
-      _chargerDonnees();
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
   Future<void> _sauvegarderDescription() async {
     if (_tache == null) return;
 
@@ -280,6 +264,20 @@ class _TacheDetailScreenState extends State<TacheDetailScreen> {
     });
   }
 
+  Future<void> _copierTexte(String texte) async {
+    await Clipboard.setData(ClipboardData(text: texte));
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Texte copié dans le presse-papier'),
+        backgroundColor: AppTheme.success,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
+  }
 
 
 
@@ -299,7 +297,7 @@ Widget _buildDescriptionAvecLiens(String description) {
   );
 }
 
-// REMPLACEZ cette méthode par :
+
 void _showLinkOptions(BuildContext context, String url) {
   showModalBottomSheet(
     context: context,
@@ -346,7 +344,6 @@ void _showLinkOptions(BuildContext context, String url) {
         children: [
           // AppBar fixe
           Container(
-            height: MediaQuery.of(context).padding.top + 100, // Inclut la barre de statut
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -409,7 +406,7 @@ void _showLinkOptions(BuildContext context, String url) {
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            _tache!.titre,
+                                           'Détail',
                                             style: TextStyle(
                                               fontSize: 24,
                                               fontWeight: FontWeight.w700,
@@ -432,16 +429,7 @@ void _showLinkOptions(BuildContext context, String url) {
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      _projet!.titre,
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.white.withOpacity(0.9),
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                                   
                                   ],
                                 ),
                               ),
@@ -494,6 +482,48 @@ void _showLinkOptions(BuildContext context, String url) {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                                    Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _tache!.titre,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.grey[800],
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.content_copy,
+                            color: AppTheme.secondary,
+                            size: 18,
+                          ),
+                          onPressed: () => _copierTexte(_tache!.titre),
+                          tooltip: 'Copier le titre',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 8,),
+                  
                   // En-tête avec statut
                   Container(
                     padding: const EdgeInsets.all(16),

@@ -223,43 +223,6 @@ class _EditInformationScreenState extends State<EditInformationScreen> {
     );
   }
 
-  void _supprimerToutesImages() {
-    if (_images.isEmpty) return;
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmer la suppression'),
-        content: Text('Voulez-vous vraiment supprimer toutes les images (${_images.length}) ?'),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Annuler',
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() {
-                _images.clear();
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.error,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Tout supprimer'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showImagePreview(int index) {
     showDialog(
       context: context,
@@ -352,7 +315,6 @@ class _EditInformationScreenState extends State<EditInformationScreen> {
         children: [
           // AppBar fixe - Même structure que CreateInformationScreen
           Container(
-            height: MediaQuery.of(context).padding.top + 70,
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -534,6 +496,8 @@ class _EditInformationScreenState extends State<EditInformationScreen> {
                               }
                               return null;
                             },
+                            maxLines: 3,
+                            minLines: 2,
                           ),
                         ],
                       ),

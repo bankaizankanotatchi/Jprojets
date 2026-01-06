@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:jprojets/models/information.dart';
 import 'package:jprojets/models/projet.dart';
@@ -783,173 +786,484 @@ Future<void> toggleSousTacheCompletee(String projetId, String tacheId, String so
     }
 
     // Filtre par nombre de points
-if (nombreMinPoints != null) {
-  resultats = resultats.where((info) => info.points.length >= nombreMinPoints).toList();
-}
-if (nombreMaxPoints != null) {
-  resultats = resultats.where((info) => info.points.length <= nombreMaxPoints).toList();
-}
+    if (nombreMinPoints != null) {
+      resultats = resultats.where((info) => info.points.length >= nombreMinPoints).toList();
+    }
+    if (nombreMaxPoints != null) {
+      resultats = resultats.where((info) => info.points.length <= nombreMaxPoints).toList();
+    }
 
-// Tri des résultats
-if (triPar != null) {
-  switch (triPar) {
-    case 'date_creation':
-      resultats.sort((a, b) => a.dateCreation.compareTo(b.dateCreation));
-      break;
-    case 'date_modification':
-      resultats.sort((a, b) {
-        final dateA = a.dateModification ?? a.dateCreation;
-        final dateB = b.dateModification ?? b.dateCreation;
-        return dateA.compareTo(dateB);
-      });
-      break;
-    case 'titre':
-      resultats.sort((a, b) => a.titre.toLowerCase().compareTo(b.titre.toLowerCase()));
-      break;
-    case 'nombre_points':
-      resultats.sort((a, b) => a.points.length.compareTo(b.points.length));
-      break;
+    // Tri des résultats
+    if (triPar != null) {
+      switch (triPar) {
+        case 'date_creation':
+          resultats.sort((a, b) => a.dateCreation.compareTo(b.dateCreation));
+          break;
+        case 'date_modification':
+          resultats.sort((a, b) {
+            final dateA = a.dateModification ?? a.dateCreation;
+            final dateB = b.dateModification ?? b.dateCreation;
+            return dateA.compareTo(dateB);
+          });
+          break;
+        case 'titre':
+          resultats.sort((a, b) => a.titre.toLowerCase().compareTo(b.titre.toLowerCase()));
+          break;
+        case 'nombre_points':
+          resultats.sort((a, b) => a.points.length.compareTo(b.points.length));
+          break;
+      }
+
+      // Inverse l'ordre si demandé
+      if (ordreDecroissant == true) {
+        resultats = resultats.reversed.toList();
+      }
+    }
+
+    return resultats;
   }
 
-  // Inverse l'ordre si demandé
-  if (ordreDecroissant == true) {
-    resultats = resultats.reversed.toList();
+    // ==================== KPIs - STATISTIQUES PROJETS ====================
+    /// Compte le nombre total de projets
+    int getNombreTotalProjets() {
+      return _projetBox.length;
+    }
+    /// Compte les projets en attente
+    int getNombreProjetsEnAttente() {
+      return _projetBox.values.where((p) => p.statut == 'en_attente').length;
+    }
+    /// Compte les projets en cours
+    int getNombreProjetsEnCours() {
+      return _projetBox.values.where((p) => p.statut == 'en_cours').length;
+    }
+    /// Compte les projets terminés
+    int getNombreProjetsTermines() {
+      return _projetBox.values.where((p) => p.statut == 'termine').length;
+    }
+    /// Compte le nombre total de tâches dans tous les projets
+    int getNombreTotalTaches() {
+    int total = 0;
+
+    for (var projet in _projetBox.values) {
+      total += projet.taches.length;
+    }
+    return total;
+    }
+    /// Compte le nombre de tâches complétées dans tous les projets
+    int getNombreTachesCompletees() {
+    int total = 0;
+    for (var projet in _projetBox.values) {
+      total += projet.taches.where((t) => t.estCompletee).length;
+    }
+    
+    return total;
+  }
+
+  // ==================== KPIs - STATISTIQUES INFORMATIONS ====================
+  /// Compte le nombre total d'informations
+  int getNombreTotalInformations() {
+    return _informationBox.length;
+  }
+  /// Compte les informations créées aujourd'hui
+  int getNombreInformationsAujourdhui() {
+    final aujourdhui = DateTime.now();
+
+    return _informationBox.values.where((info) {
+      return info.dateCreation.year == aujourdhui.year &&
+      info.dateCreation.month == aujourdhui.month &&
+      info.dateCreation.day == aujourdhui.day;
+    }).length;
+  }
+
+  /// Compte les informations créées cette semaine
+  int getNombreInformationsCetteSemaine() {
+    final maintenant = DateTime.now();
+    final debutSemaine = maintenant.subtract(Duration(days: maintenant.weekday - 1));
+    final debutSemaineMinuit = DateTime(debutSemaine.year, debutSemaine.month, debutSemaine.day);
+
+    return _informationBox.values.where((info) {
+      return info.dateCreation.isAfter(debutSemaineMinuit) || info.dateCreation.isAtSameMomentAs(debutSemaineMinuit);
+    }).length;
+  }
+
+  /// Compte les informations créées ce mois
+  int getNombreInformationsCeMois() {
+    final maintenant = DateTime.now();
+
+    return _informationBox.values.where((info) {
+      return info.dateCreation.year == maintenant.year &&
+      info.dateCreation.month == maintenant.month;
+    }).length;
+  }
+    /// Récupère les informations par période (jour, semaine, mois)
+    Map<String, int> getStatistiquesInformationsParPeriode() {
+      return {
+      'aujourdhui': getNombreInformationsAujourdhui(),
+      'cette_semaine': getNombreInformationsCetteSemaine(),
+      'ce_mois': getNombreInformationsCeMois(),
+      'total': getNombreTotalInformations(),
+      };
+    }
+    /// Récupère toutes les statistiques des projets
+    Map<String, int> getStatistiquesProjets() {
+      return {
+      'total': getNombreTotalProjets(),
+      'en_attente': getNombreProjetsEnAttente(),
+      'en_cours': getNombreProjetsEnCours(),
+      'termines': getNombreProjetsTermines(),
+      'total_taches': getNombreTotalTaches(),
+      'taches_completees': getNombreTachesCompletees(),
+      };
+    }
+  // ==================== UTILITAIRES ====================
+  /// Ferme toutes les boxes Hive
+  Future<void> fermerTout() async {
+    await _userBox.close();
+    await _projetBox.close();
+    await _informationBox.close();
+  }
+
+  /// Exporte toutes les données sous forme de Map (pour backup)
+  Map<String, dynamic> exporterDonnees() {
+    return {
+      'user': _userBox.get('current_user')?.nom,
+      'projets': _projetBox.values.map((p) => {
+        'id': p.id,
+        'titre': p.titre,
+        'description': p.description,
+        'statut': p.statut,
+        'images': p.images,
+        'dateCreation': p.dateCreation.toIso8601String(),
+        'dateModification': p.dateModification?.toIso8601String(),
+          'taches': p.taches.map((t) => {
+          'id': t.id,
+          'titre': t.titre,
+          'description': t.description,
+          'estCompletee': t.estCompletee,
+          'dateCreation': t.dateCreation.toIso8601String(),
+            'sousTaches': t.sousTaches?.map((st) => {
+            'id': st.id,
+            'titre': st.titre,
+            'estCompletee': st.estCompletee,
+            }).toList(),
+            'checklist': t.checklist,
+          }).toList(),
+      }).toList(),
+      'informations': _informationBox.values.map((info) => {
+        'id': info.id,
+        'titre': info.titre,
+        'points': info.points,
+        'images': info.images,
+        'dateCreation': info.dateCreation.toIso8601String(),
+        'dateModification': info.dateModification?.toIso8601String(),
+      }).toList(),
+    };
+  }
+
+  // ==================== EXPORT/IMPORT PROJETS ====================
+
+/// Exporte tous les projets en format JSON
+Future<String> exporterProjetsEnJson() async {
+  final projets = getTousProjets();
+  final List<Map<String, dynamic>> projetsData = [];
+  
+  for (final projet in projets) {
+    projetsData.add(_projetToMap(projet));
+  }
+  
+  return jsonEncode({
+    'type': 'jprojets_export',
+    'version': '1.0',
+    'date_export': DateTime.now().toIso8601String(),
+    'nombre_projets': projetsData.length,
+    'projets': projetsData,
+  });
+}
+
+/// Exporte un projet spécifique en JSON
+Future<String> exporterProjetEnJson(String projetId) async {
+  final projet = getProjetParId(projetId);
+  if (projet == null) {
+    throw Exception('Projet non trouvé');
+  }
+  
+  return jsonEncode({
+    'type': 'jprojets_projet',
+    'version': '1.0',
+    'date_export': DateTime.now().toIso8601String(),
+    'projet': _projetToMap(projet),
+  });
+}
+
+/// Importe des projets depuis un JSON
+Future<List<Projet>> importerProjetsDepuisJson(String jsonData) async {
+  final data = jsonDecode(jsonData);
+  
+  // Validation basique
+  if (data['type'] != 'jprojets_export' && data['type'] != 'jprojets_projet') {
+    throw Exception('Format JSON invalide pour JProjets');
+  }
+  
+  final List<Projet> projetsImportes = [];
+  
+  if (data['type'] == 'jprojets_export') {
+    // Import multiple
+    final projetsList = data['projets'] as List;
+    for (final projetData in projetsList) {
+      final projet = await _creerProjetDepuisMap(projetData);
+      projetsImportes.add(projet);
+    }
+  } else {
+    // Import unique
+    final projetData = data['projet'];
+    final projet = await _creerProjetDepuisMap(projetData);
+    projetsImportes.add(projet);
+  }
+  
+  return projetsImportes;
+}
+
+// ==================== EXPORT/IMPORT INFORMATIONS ====================
+
+/// Exporte toutes les informations en format JSON
+Future<String> exporterInformationsEnJson() async {
+  final informations = getToutesInformations();
+  final List<Map<String, dynamic>> infosData = [];
+  
+  for (final info in informations) {
+    infosData.add(_informationToMap(info));
+  }
+  
+  return jsonEncode({
+    'type': 'jprojets_infos_export',
+    'version': '1.0',
+    'date_export': DateTime.now().toIso8601String(),
+    'nombre_informations': infosData.length,
+    'informations': infosData,
+  });
+}
+
+/// Exporte une information spécifique en JSON
+Future<String> exporterInformationEnJson(String infoId) async {
+  final info = getInformationParId(infoId);
+  if (info == null) {
+    throw Exception('Information non trouvée');
+  }
+  
+  return jsonEncode({
+    'type': 'jprojets_information',
+    'version': '1.0',
+    'date_export': DateTime.now().toIso8601String(),
+    'information': _informationToMap(info),
+  });
+}
+
+/// Importe des informations depuis un JSON
+Future<List<Information>> importerInformationsDepuisJson(String jsonData) async {
+  final data = jsonDecode(jsonData);
+  
+  if (data['type'] != 'jprojets_infos_export' && data['type'] != 'jprojets_information') {
+    throw Exception('Format JSON invalide pour JProjets Informations');
+  }
+  
+  final List<Information> infosImportees = [];
+  
+  if (data['type'] == 'jprojets_infos_export') {
+    final infosList = data['informations'] as List;
+    for (final infoData in infosList) {
+      final info = await _creerInformationDepuisMap(infoData);
+      infosImportees.add(info);
+    }
+  } else {
+    final infoData = data['information'];
+    final info = await _creerInformationDepuisMap(infoData);
+    infosImportees.add(info);
+  }
+  
+  return infosImportees;
+}
+
+// ==================== EXPORT/IMPORT COMPLET ====================
+
+/// Exporte TOUTES les données de l'application
+Future<String> exporterToutesDonneesEnJson() async {
+  final projetsJson = await exporterProjetsEnJson();
+  final infosJson = await exporterInformationsEnJson();
+  
+  final projetsData = jsonDecode(projetsJson);
+  final infosData = jsonDecode(infosJson);
+  
+  return jsonEncode({
+    'type': 'jprojets_complet_export',
+    'version': '1.0',
+    'date_export': DateTime.now().toIso8601String(),
+    'utilisateur': getUtilisateurConnecte()?.nom,
+    'projets': projetsData['projets'],
+    'informations': infosData['informations'],
+    'statistiques': {
+      'projets': getStatistiquesProjets(),
+      'informations': getStatistiquesInformationsParPeriode(),
+    },
+  });
+}
+
+/// Importe toutes les données depuis un JSON complet
+Future<Map<String, dynamic>> importerToutesDonneesDepuisJson(String jsonData) async {
+  final data = jsonDecode(jsonData);
+  
+  if (data['type'] != 'jprojets_complet_export') {
+    throw Exception('Format JSON invalide pour export complet');
+  }
+  
+  final result = {
+    'projets': <Projet>[],
+    'informations': <Information>[],
+  };
+  
+  // Import des projets
+  if (data['projets'] != null) {
+    for (final projetData in data['projets'] as List) {
+      final projet = await _creerProjetDepuisMap(projetData);
+      result['projets']!.add(projet);
+    }
+  }
+  
+  // Import des informations
+  if (data['informations'] != null) {
+    for (final infoData in data['informations'] as List) {
+      final info = await _creerInformationDepuisMap(infoData);
+      result['informations']!.add(info);
+    }
+  }
+  
+  return result;
+}
+
+// ==================== METHODES PRIVEES D'AIDE ====================
+
+/// Convertit un projet en Map pour JSON
+Map<String, dynamic> _projetToMap(Projet projet) {
+  return {
+    'id': projet.id,
+    'titre': projet.titre,
+    'description': projet.description,
+    'statut': projet.statut,
+    'images': projet.images,
+    'taches': projet.taches.map((tache) => _tacheToMap(tache)).toList(),
+    'dateCreation': projet.dateCreation.toIso8601String(),
+    'dateModification': projet.dateModification?.toIso8601String(),
+  };
+}
+
+/// Convertit une tâche en Map pour JSON
+Map<String, dynamic> _tacheToMap(Tache tache) {
+  return {
+    'id': tache.id,
+    'titre': tache.titre,
+    'description': tache.description,
+    'estCompletee': tache.estCompletee,
+    'sousTaches': tache.sousTaches?.map((st) => _sousTacheToMap(st)).toList(),
+    'checklist': tache.checklist,
+    'dateCreation': tache.dateCreation.toIso8601String(),
+  };
+}
+
+/// Convertit une sous-tâche en Map pour JSON
+Map<String, dynamic> _sousTacheToMap(SousTache sousTache) {
+  return {
+    'id': sousTache.id,
+    'titre': sousTache.titre,
+    'estCompletee': sousTache.estCompletee,
+    'dateCreation': sousTache.dateCreation.toIso8601String(),
+  };
+}
+
+/// Convertit une information en Map pour JSON
+Map<String, dynamic> _informationToMap(Information info) {
+  return {
+    'id': info.id,
+    'titre': info.titre,
+    'points': info.points,
+    'images': info.images,
+    'dateCreation': info.dateCreation.toIso8601String(),
+    'dateModification': info.dateModification?.toIso8601String(),
+  };
+}
+
+/// Crée un projet depuis une Map (import)
+Future<Projet> _creerProjetDepuisMap(Map<String, dynamic> data) async {
+  // Si le projet existe déjà, on le met à jour
+  final projetExistant = getProjetParId(data['id']);
+  
+  if (projetExistant != null) {
+    // Option 1: Mettre à jour l'existant
+    await updateProjet(
+      id: data['id'],
+      titre: data['titre'],
+      description: data['description'],
+      statut: data['statut'],
+      images: List<String>.from(data['images'] ?? []),
+    );
+    return getProjetParId(data['id'])!;
+  } else {
+    // Option 2: Créer un nouveau avec un ID différent
+    final nouveauProjet = await creerProjet(
+      titre: data['titre'],
+      description: data['description'],
+      images: List<String>.from(data['images'] ?? []),
+      statut: data['statut'],
+    );
+    
+    // Ajouter les tâches
+    if (data['taches'] != null) {
+      for (final tacheData in data['taches'] as List) {
+        await _ajouterTacheDepuisMap(nouveauProjet.id, tacheData);
+      }
+    }
+    
+    return nouveauProjet;
   }
 }
 
-return resultats;
+/// Ajoute une tâche depuis une Map (import)
+Future<void> _ajouterTacheDepuisMap(String projetId, Map<String, dynamic> data) async {
+  await ajouterTache(
+    projetId: projetId,
+    titre: data['titre'],
+    description: data['description'],
+    sousTaches: data['sousTaches'] != null
+        ? (data['sousTaches'] as List)
+            .map((st) => SousTache(
+                  id: st['id'],
+                  titre: st['titre'],
+                  estCompletee: st['estCompletee'],
+                  dateCreation: DateTime.parse(st['dateCreation']),
+                ))
+            .toList()
+        : null,
+    checklist: List<String>.from(data['checklist'] ?? []),
+  );
+}
+
+/// Crée une information depuis une Map (import)
+Future<Information> _creerInformationDepuisMap(Map<String, dynamic> data) async {
+  final infoExistant = getInformationParId(data['id']);
+  
+  if (infoExistant != null) {
+    await updateInformation(
+      id: data['id'],
+      titre: data['titre'],
+      points: List<String>.from(data['points']),
+      images: List<String>.from(data['images'] ?? []),
+    );
+    return getInformationParId(data['id'])!;
+  } else {
+    return await creerInformation(
+      titre: data['titre'],
+      points: List<String>.from(data['points']),
+      images: List<String>.from(data['images'] ?? []),
+    );
   }
-// ==================== KPIs - STATISTIQUES PROJETS ====================
-/// Compte le nombre total de projets
-int getNombreTotalProjets() {
-return _projetBox.length;
 }
-/// Compte les projets en attente
-int getNombreProjetsEnAttente() {
-return _projetBox.values.where((p) => p.statut == 'en_attente').length;
-}
-/// Compte les projets en cours
-int getNombreProjetsEnCours() {
-return _projetBox.values.where((p) => p.statut == 'en_cours').length;
-}
-/// Compte les projets terminés
-int getNombreProjetsTermines() {
-return _projetBox.values.where((p) => p.statut == 'termine').length;
-}
-/// Compte le nombre total de tâches dans tous les projets
-int getNombreTotalTaches() {
-int total = 0;
-for (var projet in _projetBox.values) {
-total += projet.taches.length;
-}
-return total;
-}
-/// Compte le nombre de tâches complétées dans tous les projets
-int getNombreTachesCompletees() {
-int total = 0;
-for (var projet in _projetBox.values) {
-total += projet.taches.where((t) => t.estCompletee).length;
-}
-return total;
-}
-// ==================== KPIs - STATISTIQUES INFORMATIONS ====================
-/// Compte le nombre total d'informations
-int getNombreTotalInformations() {
-return _informationBox.length;
-}
-/// Compte les informations créées aujourd'hui
-int getNombreInformationsAujourdhui() {
-final aujourdhui = DateTime.now();
-return _informationBox.values.where((info) {
-return info.dateCreation.year == aujourdhui.year &&
-info.dateCreation.month == aujourdhui.month &&
-info.dateCreation.day == aujourdhui.day;
-}).length;
-}
-/// Compte les informations créées cette semaine
-int getNombreInformationsCetteSemaine() {
-final maintenant = DateTime.now();
-final debutSemaine = maintenant.subtract(Duration(days: maintenant.weekday - 1));
-final debutSemaineMinuit = DateTime(debutSemaine.year, debutSemaine.month, debutSemaine.day);
-return _informationBox.values.where((info) {
-  return info.dateCreation.isAfter(debutSemaineMinuit) || info.dateCreation.isAtSameMomentAs(debutSemaineMinuit);
-}).length;
-}
-/// Compte les informations créées ce mois
-int getNombreInformationsCeMois() {
-final maintenant = DateTime.now();
-return _informationBox.values.where((info) {
-return info.dateCreation.year == maintenant.year &&
-info.dateCreation.month == maintenant.month;
-}).length;
-}
-/// Récupère les informations par période (jour, semaine, mois)
-Map<String, int> getStatistiquesInformationsParPeriode() {
-return {
-'aujourdhui': getNombreInformationsAujourdhui(),
-'cette_semaine': getNombreInformationsCetteSemaine(),
-'ce_mois': getNombreInformationsCeMois(),
-'total': getNombreTotalInformations(),
-};
-}
-/// Récupère toutes les statistiques des projets
-Map<String, int> getStatistiquesProjets() {
-return {
-'total': getNombreTotalProjets(),
-'en_attente': getNombreProjetsEnAttente(),
-'en_cours': getNombreProjetsEnCours(),
-'termines': getNombreProjetsTermines(),
-'total_taches': getNombreTotalTaches(),
-'taches_completees': getNombreTachesCompletees(),
-};
-}
-// ==================== UTILITAIRES ====================
-/// Ferme toutes les boxes Hive
-Future<void> fermerTout() async {
-await _userBox.close();
-await _projetBox.close();
-await _informationBox.close();
-}
-/// Supprime toutes les données de l'application (ATTENTION: irréversible)
-Future<void> reinitialiserApplication() async {
-await _userBox.clear();
-await _projetBox.clear();
-await _informationBox.clear();
-}
-/// Exporte toutes les données sous forme de Map (pour backup)
-Map<String, dynamic> exporterDonnees() {
-return {
-'user': _userBox.get('current_user')?.nom,
-'projets': _projetBox.values.map((p) => {
-'id': p.id,
-'titre': p.titre,
-'description': p.description,
-'statut': p.statut,
-'images': p.images,
-'dateCreation': p.dateCreation.toIso8601String(),
-'dateModification': p.dateModification?.toIso8601String(),
-'taches': p.taches.map((t) => {
-'id': t.id,
-'titre': t.titre,
-'description': t.description,
-'estCompletee': t.estCompletee,
-'dateCreation': t.dateCreation.toIso8601String(),
-'sousTaches': t.sousTaches?.map((st) => {
-'id': st.id,
-'titre': st.titre,
-'estCompletee': st.estCompletee,
-}).toList(),
-'checklist': t.checklist,
-}).toList(),
-}).toList(),
-'informations': _informationBox.values.map((info) => {
-'id': info.id,
-'titre': info.titre,
-'points': info.points,
-'images': info.images,
-'dateCreation': info.dateCreation.toIso8601String(),
-'dateModification': info.dateModification?.toIso8601String(),
-}).toList(),
-};
-}
+
 }

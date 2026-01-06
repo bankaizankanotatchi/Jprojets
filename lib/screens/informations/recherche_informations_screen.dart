@@ -72,7 +72,6 @@ class _RechercheInformationsScreenState extends State<RechercheInformationsScree
         children: [
           // AppBar fixe
           Container(
-            height: MediaQuery.of(context).padding.top + 80, // Inclut la barre de statut
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -566,94 +565,6 @@ class _RechercheInformationsScreenState extends State<RechercheInformationsScree
             ),
           ),
         ],
-      ),
-    );
-  }
-  
-  Widget _buildImageFilterButton(String id, String text, IconData icon, bool value) {
-    final isSelected = _avecImages == value;
-    
-    return ElevatedButton(
-      onPressed: () {
-        setState(() {
-          _avecImages = isSelected ? null : value;
-        });
-        _rechercher();
-      },
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? AppTheme.secondary : Colors.white,
-        foregroundColor: isSelected ? Colors.white : AppTheme.secondary,
-        elevation: isSelected ? 2 : 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: BorderSide(
-            color: isSelected ? AppTheme.secondary : Colors.grey[300]!,
-            width: 1,
-          ),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 14),
-          const SizedBox(width: 6),
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildDateButton({
-    required bool isStart,
-    required String label,
-    required DateTime? selectedDate,
-  }) {
-    return ElevatedButton(
-      onPressed: () async {
-        final date = await showDatePicker(
-          context: context,
-          initialDate: DateTime.now(),
-          firstDate: DateTime(2000),
-          lastDate: DateTime.now(),
-        );
-        
-        if (date != null) {
-          if (isStart) {
-            setState(() => _selectedDateDebut = date);
-          } else {
-            setState(() => _selectedDateFin = date);
-          }
-          _rechercher();
-        }
-      },
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.white,
-        foregroundColor: selectedDate != null ? AppTheme.secondary : Colors.grey[700],
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: BorderSide(
-            color: selectedDate != null ? AppTheme.secondary : Colors.grey[300]!,
-            width: selectedDate != null ? 2 : 1,
-          ),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-      ),
-      child: Text(
-        selectedDate != null
-            ? '$label: ${_formatDate(selectedDate!)}'
-            : label,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: selectedDate != null ? FontWeight.w600 : FontWeight.w500,
-        ),
       ),
     );
   }

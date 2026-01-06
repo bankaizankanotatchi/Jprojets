@@ -164,44 +164,7 @@ class _CreateInformationScreenState extends State<CreateInformationScreen> {
       _images.removeAt(index);
     });
   }
-  
-  void _supprimerToutesImages() {
-    if (_images.isEmpty) return;
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmer la suppression'),
-        content: Text('Voulez-vous vraiment supprimer toutes les images (${_images.length}) ?'),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Annuler',
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() {
-                _images.clear();
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.error,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Tout supprimer'),
-          ),
-        ],
-      ),
-    );
-  }
-  
+
   void _showImagePreview(int index) {
     showDialog(
       context: context,
@@ -306,7 +269,6 @@ class _CreateInformationScreenState extends State<CreateInformationScreen> {
         children: [
           // AppBar fixe
           Container(
-            height: MediaQuery.of(context).padding.top + 70, // Inclut la barre de statut
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -466,6 +428,8 @@ class _CreateInformationScreenState extends State<CreateInformationScreen> {
                               }
                               return null;
                             },
+                            maxLines: 3,
+                            minLines: 2,
                           ),
                         ],
                       ),
@@ -541,7 +505,7 @@ class _CreateInformationScreenState extends State<CreateInformationScreen> {
                                           controller: controller,
                                           decoration: InputDecoration(
                                             hintText: 'Point ${index + 1}',
-                                            helperText: 'Vous pouvez inclure des liens (http://...)',
+                                            helperText: 'Vous pouvez inclure des liens (https://...)',
                                             helperStyle: TextStyle(
                                               fontSize: 11,
                                               color: Colors.grey[500],
@@ -573,8 +537,8 @@ class _CreateInformationScreenState extends State<CreateInformationScreen> {
                                                   )
                                                 : null,
                                           ),
-                                          maxLines: 3,
-                                          minLines: 1,
+                                          maxLines: 4,
+                                          minLines: 2,
                                         ),
                                       ],
                                     ),

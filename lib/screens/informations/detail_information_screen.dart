@@ -1,13 +1,16 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:jprojets/services/pdf_service.dart';
 import 'package:jprojets/theme/app_theme.dart';
 import 'package:jprojets/models/information.dart';
 import 'package:jprojets/screens/informations/edit_information_screen.dart';
 import 'package:jprojets/services/database_service.dart';
 import 'package:jprojets/widgets/link_actions_bottom_sheet.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'dart:io';
 
 class DetailInformationScreen extends StatefulWidget {
   final DatabaseService databaseService;
@@ -25,6 +28,7 @@ class DetailInformationScreen extends StatefulWidget {
 
 class _DetailInformationScreenState extends State<DetailInformationScreen> {
   late Information? _information;
+  bool _isExporting = false;
   
   @override
   void initState() {
@@ -36,6 +40,61 @@ class _DetailInformationScreenState extends State<DetailInformationScreen> {
     setState(() {
       _information = widget.databaseService.getInformationParId(widget.infoId);
     });
+  }
+  
+  Future<void> _exporterInformation() async {
+    if (_information == null) return;
+    
+    try {
+      setState(() {
+        _isExporting = true;
+      });
+      
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      final jsonData = await widget.databaseService.exporterInformationEnJson(widget.infoId);
+      
+      final date = DateTime.now();
+      final fileName = 'information_${_information!.titre.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}_${date.year}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}.json';
+      
+      final bytes = utf8.encode(jsonData);
+      
+      final result = await FilePicker.platform.saveFile(
+        dialogTitle: 'Exporter cette information',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        bytes: Uint8List.fromList(bytes),
+      );
+      
+      if (result != null) {
+        final file = File(result);
+        await file.writeAsString(jsonData);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Information "${_information!.titre}" exportée avec succès !'),
+              backgroundColor: AppTheme.success,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        print('Erreur lors de l\'export du projet : $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isExporting = false;
+        });
+      }
+    }
   }
   
   Future<void> _supprimerInformation() async {
@@ -116,33 +175,72 @@ class _DetailInformationScreenState extends State<DetailInformationScreen> {
       ),
     );
   }
-  
-  Future<void> _ouvrirLien(String url) async {
-    try {
-      final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(
-          uri,
-          mode: LaunchMode.externalApplication,
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Impossible d\'ouvrir ce lien'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('URL invalide'),
-          backgroundColor: AppTheme.error,
-        ),
-      );
-    }
-  }
 
+  Future<void> _exporterEnPdf() async {
+  if (_information == null) return;
+  
+  try {
+    final pdfService = PdfExportService();
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+    
+    final pdfBytes = await pdfService.generateInformationPdf(_information!);
+    
+    Navigator.pop(context);
+    
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('PDF généré'),
+        content: const Text('Que souhaitez-vous faire avec le PDF ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'preview'),
+            child: const Text('Prévisualiser'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'share'),
+            child: const Text('Partager'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'cancel'),
+            child: const Text('Annuler'),
+          ),
+        ],
+      ),
+    );
+    
+    if (action == 'preview') {
+      await pdfService.previewPdf(pdfBytes, _information!.titre);
+    } else if (action == 'share') {
+      final fileName = 'information_${_information!.titre.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final filePath = await pdfService.savePdfLocally(pdfBytes, fileName);
+      
+      await pdfService.sharePdf(filePath, 'Information: ${_information!.titre}');
+    }
+    
+  } catch (e) {
+    if (Navigator.canPop(context)) Navigator.pop(context);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Erreur lors de la génération du PDF: $e'),
+        backgroundColor: AppTheme.error,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
+  }
+}
+  
   void _showImagePreview(int index) {
     if (_information?.images == null || _information!.images!.isEmpty) return;
     
@@ -258,6 +356,40 @@ class _DetailInformationScreenState extends State<DetailInformationScreen> {
     );
   }
 
+  Widget _buildLoaderOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.5),
+        child: Center(
+          child: Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.cloud_upload,
+                  color: AppTheme.secondary,
+                  size: 30,
+                ),
+                const SizedBox(height: 8),
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
     if (_information == null) {
@@ -277,455 +409,479 @@ class _DetailInformationScreenState extends State<DetailInformationScreen> {
       );
     }
     
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
-      // CHANGEMENT : Utiliser Column au lieu de CustomScrollView
-      body: Column(
-        children: [
-          // AppBar fixe
-          Container(
-            height: MediaQuery.of(context).padding.top + 70, // Inclut la barre de statut
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  AppTheme.secondary,
-                  AppTheme.secondary.withOpacity(0.8),
-                ],
-              ),
-            ),
-            child: Stack(
-              children: [
-                // Fond qui s'étend sous la barre de statut
-                Positioned.fill(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          AppTheme.secondary,
-                          AppTheme.secondary.withOpacity(0.8),
-                        ],
-                      ),
-                    ),
+    return Stack(
+      children: [
+        Scaffold(
+          backgroundColor: Colors.grey[50],
+          body: Column(
+            children: [
+              // AppBar fixe
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppTheme.secondary,
+                      AppTheme.secondary.withOpacity(0.8),
+                    ],
                   ),
                 ),
-                
-                // Contenu de l'AppBar
-                SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.only(
-                      left: 16,
-                      right: 16,
-                      bottom: 16,
+                child: Stack(
+                  children: [
+                    // Fond qui s'étend sous la barre de statut
+                    Positioned.fill(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              AppTheme.secondary,
+                              AppTheme.secondary.withOpacity(0.8),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Première ligne : Boutons gauche et droite
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    
+                    // Contenu de l'AppBar
+                    SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          left: 16,
+                          right: 16,
+                          bottom: 16,
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Bouton retour à gauche
-                            IconButton(
-                              icon: const Icon(Icons.arrow_back, color: Colors.white),
-                              onPressed: () => Navigator.pop(context),
-                            ),
-                            
-                            // Espace vide au centre
-                            Text(
-                              'Détail',
-                              style: TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            
-                            // Boutons à droite
+                            // Première ligne : Boutons gauche et droite
                             Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                // Bouton modifier
+                                // Bouton retour à gauche
                                 IconButton(
-                                  icon: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.2),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Icon(
-                                      Icons.edit,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => EditInformationScreen(
-                                          databaseService: widget.databaseService,
-                                          infoId: widget.infoId,
-                                        ),
-                                      ),
-                                    ).then((_) => _chargerInformation());
-                                  },
-                                  tooltip: 'Modifier',
+                                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                                  onPressed: () => Navigator.pop(context),
                                 ),
                                 
-                                // Menu plus d'options
-                                PopupMenuButton<String>(
-                                  icon: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.2),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Icon(
-                                      Icons.more_vert,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  onSelected: (value) {
-                                    if (value == 'delete') {
-                                      _supprimerInformation();
-                                    } else if (value == 'copy_all') {
-                                      _copierTexte(_information!.points.join('\n'));
-                                    }
-                                  },
-                                  itemBuilder: (context) => [
-                                    PopupMenuItem(
-                                      value: 'copy_all',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.content_copy, size: 20, color: Colors.grey[700]),
-                                          const SizedBox(width: 12),
-                                          const Text('Copier tout'),
-                                        ],
+                                // Espace vide au centre
+                                const Text('Détail', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+                                
+                                // Boutons à droite
+                                Row(
+                                  children: [
+                                    // Bouton exporter
+                                    IconButton(
+                                      icon: Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.2),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                          Icons.cloud_upload,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
                                       ),
+                                      onPressed: _exporterInformation,
+                                      tooltip: 'Exporter cette information',
                                     ),
-                                    const PopupMenuDivider(),
-                                    PopupMenuItem(
-                                      value: 'delete',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.delete, color: AppTheme.error, size: 20),
-                                          const SizedBox(width: 12),
-                                          const Text('Supprimer'),
-                                        ],
+                                    
+                                    // Bouton modifier
+                                    IconButton(
+                                      icon: Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.2),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                          Icons.edit,
+                                          color: Colors.white,
+                                          size: 20,
+                                        ),
                                       ),
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => EditInformationScreen(
+                                              databaseService: widget.databaseService,
+                                              infoId: widget.infoId,
+                                            ),
+                                          ),
+                                        ).then((_) => _chargerInformation());
+                                      },
+                                      tooltip: 'Modifier',
+                                    ),
+                                    
+                                    // Menu plus d'options
+                                    PopupMenuButton<String>(
+                                      icon: Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.2),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                          Icons.more_vert,
+                                          color: Colors.white,
+                                          size: 20,
+                                        ),
+                                      ),
+                                      onSelected: (value) {
+                                        if (value == 'delete') {
+                                          _supprimerInformation();
+                                        } else if (value == 'copy_all') {
+                                          _copierTexte(_information!.points.join('\n'));
+                                        } else if (value == 'export_pdf') {
+                                            _exporterEnPdf();
+                                        }
+                                      },
+                                      itemBuilder: (context) => [
+                                        PopupMenuItem(
+                                            value: 'export_pdf',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.picture_as_pdf, color: AppTheme.secondary, size: 20),
+                                                const SizedBox(width: 12),
+                                                const Text('Exporter en PDF'),
+                                              ],
+                                            ),
+                                          ),
+                                        PopupMenuItem(
+                                          value: 'copy_all',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.content_copy, size: 20, color: Colors.grey[700]),
+                                              const SizedBox(width: 12),
+                                              const Text('Copier tout'),
+                                            ],
+                                          ),
+                                        ),
+                                        const PopupMenuDivider(),
+                                        PopupMenuItem(
+                                          value: 'delete',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.delete, color: AppTheme.error, size: 20),
+                                              const SizedBox(width: 12),
+                                              const Text('Supprimer'),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
                               ],
                             ),
+                            
                           ],
                         ),
-                        
-                       
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          // Contenu scrollable
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Titre
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _information!.titre,
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.grey[800],
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            Icons.content_copy,
-                            color: AppTheme.secondary,
-                            size: 18,
-                          ),
-                          onPressed: () => _copierTexte(_information!.titre),
-                          tooltip: 'Copier le titre',
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  // Date
-                  Container(
-                    margin: const EdgeInsets.only(top: 16, bottom: 8),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.calendar_today, color: Colors.grey[500], size: 14),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Enregistrée le ${_formatDate(_information!.dateCreation)}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                        
-                        if (_information!.dateModification != null) ...[
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Icon(Icons.edit, color: Colors.grey[500], size: 14),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Modifiée le ${_formatDate(_information!.dateModification!)}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  
-                  // Section Points
-                  Container(
-                    margin: const EdgeInsets.only(top: 24, bottom: 8),
-                    child: Text(
-                      'Points (${_information!.points.length})',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey[800],
                       ),
                     ),
-                  ),
-                  
-                  // Liste des Points
-                  Column(
-                    children: _information!.points.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final point = entry.value;
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        child: Card(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 0,
+                  ],
+                ),
+              ),
+              
+              // Contenu scrollable
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Titre
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
                           color: Colors.white,
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Numéro
-                                Container(
-                                  width: 28,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.secondary,
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      '${index + 1}',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _information!.titre,
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.grey[800],
                                 ),
-                                
-                                const SizedBox(width: 12),
-                                
-                                // Contenu
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      _buildPointAvecLiens(index, point),
-                                      const SizedBox(height: 8),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.end,
-                                        children: [
-                                          IconButton(
-                                            icon: Icon(
-                                              Icons.content_copy,
-                                              color: Colors.grey[500],
-                                              size: 16,
-                                            ),
-                                            onPressed: () => _copierTexte(point),
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(),
-                                            tooltip: 'Copier ce point',
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: Icon(
+                                Icons.content_copy,
+                                color: AppTheme.secondary,
+                                size: 18,
+                              ),
+                              onPressed: () => _copierTexte(_information!.titre),
+                              tooltip: 'Copier le titre',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      // Date
+                      Container(
+                        margin: const EdgeInsets.only(top: 16, bottom: 8),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.calendar_today, color: Colors.grey[500], size: 14),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Enregistrée le ${_formatDate(_information!.dateCreation)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  
-                  // Images - MODIFIÉ pour ajouter les previews
-                  if (_information!.images != null && _information!.images!.isNotEmpty) ...[
-                    Container(
-                      margin: const EdgeInsets.only(top: 24, bottom: 8),
-                      child: Text(
-                        'Images (${_information!.images!.length})',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey[800],
-                        ),
-                      ),
-                    ),
-                    
-                    SizedBox(
-                      height: 180,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _information!.images!.length,
-                        itemBuilder: (context, index) {
-                          return GestureDetector(
-                            onTap: () => _showImagePreview(index),
-                            child: Container(
-                              margin: EdgeInsets.only(
-                                right: index < _information!.images!.length - 1 
-                                    ? 12 
-                                    : 0,
-                              ),
-                              width: 250,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                image: DecorationImage(
-                                  image: FileImage(File(_information!.images![index])),
-                                  fit: BoxFit.cover,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.1),
-                                    blurRadius: 5,
-                                    offset: const Offset(0, 2),
+                            
+                            if (_information!.dateModification != null) ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Icon(Icons.edit, color: Colors.grey[500], size: 14),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Modifiée le ${_formatDate(_information!.dateModification!)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
                                   ),
                                 ],
                               ),
-                              child: Stack(
-                                children: [
-                                  Positioned(
-                                    bottom: 8,
-                                    right: 8,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            ],
+                          ],
+                        ),
+                      ),
+                      
+                      // Section Points
+                      Container(
+                        margin: const EdgeInsets.only(top: 24, bottom: 8),
+                        child: Text(
+                          'Points (${_information!.points.length})',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey[800],
+                          ),
+                        ),
+                      ),
+                      
+                      // Liste des Points
+                      Column(
+                        children: _information!.points.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final point = entry.value;
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            child: Card(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 1,
+                              color: Colors.white,
+                              child: Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // Numéro
+                                    Container(
+                                      width: 28,
+                                      height: 28,
                                       decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.6),
-                                        borderRadius: BorderRadius.circular(12),
+                                        color: AppTheme.secondary,
+                                        borderRadius: BorderRadius.circular(14),
                                       ),
-                                      child: Text(
-                                        '${index + 1}/${_information!.images!.length}',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
+                                      child: Center(
+                                        child: Text(
+                                          '${index + 1}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
                                       ),
                                     ),
+                                    
+                                    const SizedBox(width: 8),
+                                    
+                                    // Contenu
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          _buildPointAvecLiens(index, point),
+                                          const SizedBox(height: 8),
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.end,
+                                            children: [
+                                              IconButton(
+                                                icon: Icon(
+                                                  Icons.content_copy,
+                                                  color: Colors.grey[500],
+                                                  size: 16,
+                                                ),
+                                                onPressed: () => _copierTexte(point),
+                                                padding: EdgeInsets.zero,
+                                                constraints: const BoxConstraints(),
+                                                tooltip: 'Copier ce point',
+                                              ),
+                                            ],
+                                          ),
+                                    ],
                                   ),
-                                  // Icône de zoom
-                                  Positioned(
-                                    top: 8,
-                                    right: 8,
-                                    child: Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.6),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        Icons.zoom_in,
-                                        color: Colors.white,
-                                        size: 16,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                ),
+                    ]),
+                    
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                        );
+                      }).toList(),
                     ),
                     
-                    // Indicateurs sous les images (optionnel)
-                    if (_information!.images!.length > 1) ...[
-                      const SizedBox(height: 12),
-                      Center(
+                    // Images
+                    if (_information!.images != null && _information!.images!.isNotEmpty) ...[
+                      Container(
+                        margin: const EdgeInsets.only(top: 24, bottom: 8),
                         child: Text(
-                          'Cliquez sur une image pour la voir en grand',
+                          'Images (${_information!.images!.length})',
                           style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                            fontStyle: FontStyle.italic,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey[800],
                           ),
                         ),
                       ),
+                      
+                      SizedBox(
+                        height: 180,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _information!.images!.length,
+                          itemBuilder: (context, index) {
+                            return GestureDetector(
+                              onTap: () => _showImagePreview(index),
+                              child: Container(
+                                margin: EdgeInsets.only(
+                                  right: index < _information!.images!.length - 1 
+                                      ? 12 
+                                      : 0,
+                                ),
+                                width: 250,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  image: DecorationImage(
+                                    image: FileImage(File(_information!.images![index])),
+                                    fit: BoxFit.cover,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 5,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Stack(
+                                  children: [
+                                    Positioned(
+                                      bottom: 8,
+                                      right: 8,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withOpacity(0.6),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          '${index + 1}/${_information!.images!.length}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    // Icône de zoom
+                                    Positioned(
+                                      top: 8,
+                                      right: 8,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withOpacity(0.6),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(
+                                          Icons.zoom_in,
+                                          color: Colors.white,
+                                          size: 16,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      
+                      // Message d'information
+                      if (_information!.images!.length > 1) ...[
+                        const SizedBox(height: 12),
+                        Center(
+                          child: Text(
+                            'Cliquez sur une image pour la voir en grand',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
+                    
+                    // Espace en bas pour éviter les débordements
+                    const SizedBox(height: 20),
                   ],
-                  
-                  // Espace en bas pour éviter les débordements
-                  const SizedBox(height: 20),
-                ],
+                ),
               ),
-            ),
+          )],
           ),
-        ],
-      ),
+        ),
+      
+        // Loader overlay
+        if (_isExporting) _buildLoaderOverlay(),
+    ],
     );
   }
   
