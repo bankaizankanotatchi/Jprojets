@@ -1,6 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -40,11 +38,6 @@ class PdfExportService {
     color: PdfColors.grey600,
   );
   
-  final pw.TextStyle _tableCellStyle = pw.TextStyle(
-    fontSize: 10,
-    color: PdfColors.grey800,
-  );
-  
   // ==================== EXPORT PROJET ====================
   
   /// Génère un PDF pour un projet
@@ -76,29 +69,160 @@ class PdfExportService {
       );
     }
     
-    // Pages des tâches (peuvent être plusieurs pages)
+    // Pages des tâches (MultiPage pour gérer plusieurs pages)
     if (projet.taches.isNotEmpty) {
-      await _addTachesPages(pdf, projet);
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: pw.EdgeInsets.all(30),
+          header: (pw.Context context) {
+            return _buildTachesHeader(projet);
+          },
+          build: (pw.Context context) {
+            return _buildTachesContent(projet);
+          },
+          footer: (pw.Context context) {
+            return _buildPageFooter(context);
+          },
+        ),
+      );
     }
     
-    // Ajouter les pages de tâches détaillées
+    // Pages des tâches détaillées (sous-tâches et checklists)
     for (var tache in projet.taches) {
-      if (tache.sousTaches != null && tache.sousTaches!.isNotEmpty) {
+      if (tache.sousTaches != null && tache.sousTaches!.isNotEmpty || 
+          tache.checklist != null && tache.checklist!.isNotEmpty) {
         pdf.addPage(
-          pw.Page(
+          pw.MultiPage(
             pageFormat: PdfPageFormat.a4,
             margin: pw.EdgeInsets.all(30),
+            header: (pw.Context context) {
+              return _buildTacheDetailHeader(tache, context.pageNumber, context.pagesCount);
+            },
             build: (pw.Context context) {
-              return _buildTacheDetailPage(projet, tache);
+              return _buildTacheDetailContent(tache);
+            },
+            footer: (pw.Context context) {
+              return _buildPageFooter(context);
             },
           ),
         );
       }
     }
     
-    // Ajouter les pages d'images si elles existent
+    // Page avec la liste des images (MultiPage pour la liste)
     if (projet.images != null && projet.images!.isNotEmpty) {
-      await _addImagesPages(pdf, projet.images!, title: 'Images du projet');
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: pw.EdgeInsets.all(30),
+          header: (pw.Context context) {
+            return _buildImagesHeader(
+              'Images du projet',
+              projet.images!.length,
+              context.pageNumber,
+              context.pagesCount
+            );
+          },
+          build: (pw.Context context) {
+            return _buildImagesListContent(projet.images!);
+          },
+          footer: (pw.Context context) {
+            return _buildPageFooter(context);
+          },
+        ),
+      );
+      
+      // Pages séparées pour chaque image (Page simple, pas MultiPage)
+      for (int i = 0; i < projet.images!.length; i++) {
+        final imagePath = projet.images![i];
+        try {
+          final imageBytes = await _getImageBytes(imagePath);
+          
+          pdf.addPage(
+            pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              margin: pw.EdgeInsets.all(30),
+              build: (pw.Context context) {
+                return pw.Column(
+                  children: [
+                    pw.Text(
+                      'Image ${i + 1}/${projet.images!.length}',
+                      style: pw.TextStyle(
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Text(
+                      path.basename(imagePath),
+                      style: pw.TextStyle(fontSize: 12),
+                    ),
+                    pw.SizedBox(height: 30),
+                    pw.Container(
+                      alignment: pw.Alignment.center,
+                      child: pw.Image(
+                        pw.MemoryImage(imageBytes),
+                        fit: pw.BoxFit.contain,
+                        height: 400,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          );
+        } catch (e) {
+          print('❌ Erreur chargement image $imagePath: $e');
+          // Page d'erreur
+          pdf.addPage(
+            pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              margin: pw.EdgeInsets.all(30),
+              build: (pw.Context context) {
+                return pw.Column(
+                  mainAxisAlignment: pw.MainAxisAlignment.center,
+                  children: [
+                    pw.Text(
+                      'Image ${i + 1}/${projet.images!.length}',
+                      style: pw.TextStyle(
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Text(
+                      'Erreur de chargement',
+                      style: pw.TextStyle(fontSize: 14, color: PdfColors.red),
+                    ),
+                    pw.SizedBox(height: 10),
+                    pw.Text(
+                      path.basename(imagePath),
+                      style: pw.TextStyle(fontSize: 12, color: PdfColors.grey600),
+                    ),
+                    pw.SizedBox(height: 30),
+                    pw.Container(
+                      height: 200,
+                      width: 300,
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.grey200,
+                        borderRadius: pw.BorderRadius.circular(10),
+                        border: pw.Border.all(color: PdfColors.grey400),
+                      ),
+                      child: pw.Center(
+                        child: pw.Text(
+                          'Image non disponible',
+                          style: pw.TextStyle(color: PdfColors.grey600),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          );
+        }
+      }
     }
 
     return await pdf.save();
@@ -123,12 +247,120 @@ class PdfExportService {
       ),
     );
     
-    // Pages des points principaux (peuvent être plusieurs pages)
-    await _addPointsPages(pdf, info);
+    // Pages des points principaux (MultiPage)
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: pw.EdgeInsets.all(30),
+        header: (pw.Context context) {
+          return _buildPointsHeader(info, context.pageNumber, context.pagesCount);
+        },
+        build: (pw.Context context) {
+          return _buildPointsContent(info);
+        },
+        footer: (pw.Context context) {
+          return _buildPageFooter(context);
+        },
+      ),
+    );
     
-    // Ajouter les pages d'images si elles existent
+    // Page avec la liste des images (MultiPage pour la liste)
     if (info.images != null && info.images!.isNotEmpty) {
-      await _addImagesPages(pdf, info.images!, title: 'Images de l\'information');
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: pw.EdgeInsets.all(30),
+          header: (pw.Context context) {
+            return _buildImagesHeader(
+              'Images de l\'information',
+              info.images!.length,
+              context.pageNumber,
+              context.pagesCount
+            );
+          },
+          build: (pw.Context context) {
+            return _buildImagesListContent(info.images!);
+          },
+          footer: (pw.Context context) {
+            return _buildPageFooter(context);
+          },
+        ),
+      );
+      
+      // Pages séparées pour chaque image (Page simple, pas MultiPage)
+      for (int i = 0; i < info.images!.length; i++) {
+        final imagePath = info.images![i];
+        try {
+          final imageBytes = await _getImageBytes(imagePath);
+          
+          pdf.addPage(
+            pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              margin: pw.EdgeInsets.all(30),
+              build: (pw.Context context) {
+                return pw.Column(
+                  children: [
+                    pw.Text(
+                      'Image ${i + 1}/${info.images!.length}',
+                      style: pw.TextStyle(
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Text(
+                      path.basename(imagePath),
+                      style: pw.TextStyle(fontSize: 12),
+                    ),
+                    pw.SizedBox(height: 30),
+                    pw.Container(
+                      alignment: pw.Alignment.center,
+                      child: pw.Image(
+                        pw.MemoryImage(imageBytes),
+                        fit: pw.BoxFit.contain,
+                        height: 400,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          );
+        } catch (e) {
+          print('❌ Erreur chargement image $imagePath: $e');
+          // Page d'erreur
+          pdf.addPage(
+            pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              margin: pw.EdgeInsets.all(30),
+              build: (pw.Context context) {
+                return pw.Column(
+                  mainAxisAlignment: pw.MainAxisAlignment.center,
+                  children: [
+                    pw.Text(
+                      'Image ${i + 1}/${info.images!.length}',
+                      style: pw.TextStyle(
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Text(
+                      'Erreur de chargement',
+                      style: pw.TextStyle(fontSize: 14, color: PdfColors.red),
+                    ),
+                    pw.SizedBox(height: 10),
+                    pw.Text(
+                      path.basename(imagePath),
+                      style: pw.TextStyle(fontSize: 12, color: PdfColors.grey600),
+                    ),
+                  ],
+                );
+              },
+            ),
+          );
+        }
+      }
     }
     
     return await pdf.save();
@@ -309,97 +541,103 @@ class PdfExportService {
     );
   }
   
-  Future<void> _addTachesPages(pw.Document pdf, Projet projet) async {
+  // En-tête pour les pages de tâches
+  pw.Widget _buildTachesHeader(Projet projet) {
     final tachesCompletees = projet.taches.where((t) => t.estCompletee).length;
-    const maxTachesPerPage = 15; // Nombre maximum de tâches par page
-    final totalPages = (projet.taches.length / maxTachesPerPage).ceil();
+    final progress = projet.taches.isEmpty ? 0.0 : tachesCompletees / projet.taches.length * 100;
     
-    for (var pageIndex = 0; pageIndex < totalPages; pageIndex++) {
-      final startIndex = pageIndex * maxTachesPerPage;
-      final endIndex = (startIndex + maxTachesPerPage) < projet.taches.length 
-          ? startIndex + maxTachesPerPage 
-          : projet.taches.length;
-      
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          margin: pw.EdgeInsets.all(30),
-          build: (pw.Context context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                // En-tête avec pagination
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      'Tâches (${tachesCompletees}/${projet.taches.length} complétées)',
-                      style: _headerStyle,
-                    ),
-                    if (totalPages > 1)
-                      pw.Text(
-                        'Page ${pageIndex + 1}/$totalPages',
-                        style: _smallStyle,
-                      ),
-                  ],
-                ),
-                
-                pw.SizedBox(height: 20),
-                
-                // Barre de progression (uniquement sur la première page)
-                if (pageIndex == 0) ...[
-                  pw.Container(
-                    height: 8,
-                    decoration: pw.BoxDecoration(
-                      color: PdfColors.grey300,
-                      borderRadius: pw.BorderRadius.circular(4),
-                    ),
-                    child: pw.Stack(
-                      children: [
-                        pw.Container(
-                          width: double.infinity,
-                          decoration: pw.BoxDecoration(
-                            color: PdfColors.grey300,
-                            borderRadius: pw.BorderRadius.circular(4),
-                          ),
-                        ),
-                        pw.Container(
-                          width: (tachesCompletees / projet.taches.length) * 500,
-                          decoration: pw.BoxDecoration(
-                            color: _getStatusColorPdf(projet.statut),
-                            borderRadius: pw.BorderRadius.circular(4),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  pw.SizedBox(height: 15),
-                  
-                  pw.Text(
-                    '${((tachesCompletees / projet.taches.length) * 100).toStringAsFixed(1)}% complété',
-                    style: _smallStyle,
-                  ),
-                  
-                  pw.SizedBox(height: 30),
-                ] else ...[
-                  pw.SizedBox(height: 30),
-                ],
-                
-                // Liste des tâches pour cette page
-                for (var i = startIndex; i < endIndex; i++)
-                  _buildTacheItem(projet.taches[i], i + 1),
-              ],
-            );
-          },
+    return pw.Column(
+      children: [
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'Tâches du projet',
+              style: _headerStyle.copyWith(fontSize: 18),
+            ),
+            pw.Text(
+              '${tachesCompletees}/${projet.taches.length} complétées',
+              style: _smallStyle.copyWith(fontWeight: pw.FontWeight.bold),
+            ),
+          ],
         ),
+        
+        pw.SizedBox(height: 10),
+        
+        // Barre de progression
+        pw.Container(
+          height: 8,
+          decoration: pw.BoxDecoration(
+            color: PdfColors.grey300,
+            borderRadius: pw.BorderRadius.circular(4),
+          ),
+          child: pw.Stack(
+            children: [
+              pw.Container(
+                width: double.infinity,
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey300,
+                  borderRadius: pw.BorderRadius.circular(4),
+                ),
+              ),
+              pw.Container(
+                width: double.infinity,
+                decoration: pw.BoxDecoration(
+                  color: _getStatusColorPdf(projet.statut),
+                  borderRadius: pw.BorderRadius.circular(4),
+                ),
+                child: pw.SizedBox(
+                  width: (progress / 100) * 500, // Largeur relative
+                ),
+              ),
+            ],
+          ),
+        ),
+        
+        pw.SizedBox(height: 5),
+        
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'Progression globale',
+              style: _smallStyle,
+            ),
+            pw.Text(
+              '${progress.toStringAsFixed(1)}%',
+              style: _smallStyle.copyWith(fontWeight: pw.FontWeight.bold),
+            ),
+          ],
+        ),
+        
+        pw.SizedBox(height: 20),
+      ],
+    );
+  }
+  
+  // Contenu pour les pages de tâches (MultiPage)
+  List<pw.Widget> _buildTachesContent(Projet projet) {
+    final widgets = <pw.Widget>[];
+    
+    for (var i = 0; i < projet.taches.length; i++) {
+      final tache = projet.taches[i];
+      final numero = i + 1;
+      
+      widgets.add(
+        _buildTacheItem(tache, numero)
       );
+      
+      // Ajouter un espace entre les tâches (sauf pour la dernière)
+      if (i < projet.taches.length - 1) {
+        widgets.add(pw.SizedBox(height: 12));
+      }
     }
+    
+    return widgets;
   }
   
   pw.Widget _buildTacheItem(Tache tache, int numero) {
     return pw.Container(
-      margin: pw.EdgeInsets.only(bottom: 12),
       decoration: pw.BoxDecoration(
         border: pw.Border.all(color: PdfColors.grey300, width: 1),
         borderRadius: pw.BorderRadius.circular(8),
@@ -407,33 +645,43 @@ class PdfExportService {
       child: pw.Padding(
         padding: pw.EdgeInsets.all(12),
         child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            // Checkbox
-            pw.Container(
-              width: 16,
-              height: 16,
-              decoration: pw.BoxDecoration(
-                color: tache.estCompletee 
-                    ? PdfColors.grey800 
-                    : PdfColors.white,
-                borderRadius: pw.BorderRadius.circular(4),
-                border: pw.Border.all(
-                  color: PdfColors.grey600,
-                  width: 1,
+            // Checkbox et numéro
+            pw.Column(
+              children: [
+                pw.Container(
+                  width: 16,
+                  height: 16,
+                  margin: pw.EdgeInsets.only(bottom: 5),
+                  decoration: pw.BoxDecoration(
+                    color: tache.estCompletee 
+                        ? PdfColors.grey800 
+                        : PdfColors.white,
+                    borderRadius: pw.BorderRadius.circular(4),
+                    border: pw.Border.all(
+                      color: PdfColors.grey600,
+                      width: 1,
+                    ),
+                  ),
+                  child: tache.estCompletee
+                      ? pw.Center(
+                          child: pw.Text(
+                            '✓',
+                            style: pw.TextStyle(
+                              fontSize: 10,
+                              color: PdfColors.white,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                        )
+                      : null,
                 ),
-              ),
-              child: tache.estCompletee
-                  ? pw.Center(
-                      child: pw.Text(
-                        '✓',
-                        style: pw.TextStyle(
-                          fontSize: 10,
-                          color: PdfColors.white,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                    )
-                  : null,
+                pw.Text(
+                  '$numero',
+                  style: _smallStyle,
+                ),
+              ],
             ),
             
             pw.SizedBox(width: 15),
@@ -444,7 +692,7 @@ class PdfExportService {
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Text(
-                    '$numero. ${tache.titre}',
+                    tache.titre,
                     style: _bodyStyle.copyWith(
                       fontWeight: tache.estCompletee
                           ? pw.FontWeight.normal
@@ -462,27 +710,57 @@ class PdfExportService {
                       child: pw.Text(
                         tache.description!,
                         style: _smallStyle,
-                        maxLines: 2,
                       ),
                     ),
                   
-                  // Sous-tâches
-                  if (tache.sousTaches != null && 
-                      tache.sousTaches!.isNotEmpty)
-                    pw.Container(
-                      margin: pw.EdgeInsets.only(top: 8),
-                      padding: pw.EdgeInsets.all(8),
-                      decoration: pw.BoxDecoration(
-                        color: PdfColors.grey100,
-                        borderRadius: pw.BorderRadius.circular(6),
-                      ),
-                      child: pw.Text(
-                        '${tache.sousTaches!.length} sous-tâche(s)',
-                        style: _smallStyle.copyWith(
-                          color: PdfColors.grey600,
-                        ),
-                      ),
+                  // Informations supplémentaires
+                  pw.Container(
+                    margin: pw.EdgeInsets.only(top: 8),
+                    child: pw.Row(
+                      children: [
+                        // Sous-tâches
+                        if (tache.sousTaches != null && 
+                            tache.sousTaches!.isNotEmpty)
+                          pw.Container(
+                            margin: pw.EdgeInsets.only(right: 10),
+                            padding: pw.EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: pw.BoxDecoration(
+                              color: PdfColors.grey100,
+                              borderRadius: pw.BorderRadius.circular(4),
+                            ),
+                            child: pw.Text(
+                              '${tache.sousTaches!.length} sous-tâche(s)',
+                              style: _smallStyle.copyWith(
+                                color: PdfColors.grey600,
+                              ),
+                            ),
+                          ),
+                        
+                        // Checklist
+                        if (tache.checklist != null && 
+                            tache.checklist!.isNotEmpty)
+                          pw.Container(
+                            padding: pw.EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: pw.BoxDecoration(
+                              color: PdfColors.grey100,
+                              borderRadius: pw.BorderRadius.circular(4),
+                            ),
+                            child: pw.Text(
+                              '${tache.checklist!.length} item(s) checklist',
+                              style: _smallStyle.copyWith(
+                                color: PdfColors.grey600,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
+                  ),
                 ],
               ),
             ),
@@ -492,129 +770,207 @@ class PdfExportService {
     );
   }
   
-  pw.Widget _buildTacheDetailPage(Projet projet, Tache tache) {
+  // En-tête pour les pages de détails de tâches
+  pw.Widget _buildTacheDetailHeader(Tache tache, int pageNumber, int totalPages) {
     return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text(
-          'Détails : ${tache.titre}',
-          style: _headerStyle.copyWith(fontSize: 18),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'Détails de la tâche',
+              style: _headerStyle.copyWith(fontSize: 18),
+            ),
+            if (totalPages > 1)
+              pw.Text(
+                'Page $pageNumber/$totalPages',
+                style: _smallStyle,
+              ),
+          ],
         ),
         
-        pw.SizedBox(height: 15),
+        pw.SizedBox(height: 5),
         
-        if (tache.description != null && tache.description!.isNotEmpty)
-          pw.Container(
-            margin: pw.EdgeInsets.only(bottom: 20),
-            padding: pw.EdgeInsets.all(12),
-            decoration: pw.BoxDecoration(
-              border: pw.Border.all(color: PdfColors.grey300, width: 1),
-              borderRadius: pw.BorderRadius.circular(8),
-            ),
-            child: pw.Text(
-              tache.description!,
-              style: _bodyStyle,
-              textAlign: pw.TextAlign.justify,
-            ),
-          ),
+        pw.Text(
+          tache.titre,
+          style: _subtitleStyle.copyWith(fontSize: 16),
+        ),
         
-        if (tache.sousTaches != null && tache.sousTaches!.isNotEmpty) ...[
-          pw.Text(
-            'Sous-tâches',
-            style: _subtitleStyle,
-          ),
-          
-          pw.SizedBox(height: 10),
-          
-          for (var i = 0; i < tache.sousTaches!.length; i++)
-            pw.Container(
-              margin: pw.EdgeInsets.only(bottom: 8),
-              decoration: pw.BoxDecoration(
-                border: pw.Border.all(color: PdfColors.grey300, width: 1),
-                borderRadius: pw.BorderRadius.circular(6),
-              ),
-              child: pw.Padding(
-                padding: pw.EdgeInsets.all(10),
-                child: pw.Row(
-                  children: [
-                    // Checkbox sous-tâche
-                    pw.Container(
-                      width: 14,
-                      height: 14,
-                      decoration: pw.BoxDecoration(
-                        color: tache.sousTaches![i].estCompletee 
-                            ? PdfColors.grey800 
-                            : PdfColors.white,
-                        borderRadius: pw.BorderRadius.circular(3),
-                        border: pw.Border.all(
-                          color: PdfColors.grey600,
-                          width: 1,
-                        ),
-                      ),
-                      child: tache.sousTaches![i].estCompletee
-                          ? pw.Center(
-                              child: pw.Text(
-                                '✓',
-                                style: pw.TextStyle(
-                                  fontSize: 8,
-                                  color: PdfColors.white,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            )
-                          : null,
-                    ),
-                    
-                    pw.SizedBox(width: 12),
-                    
-                    pw.Expanded(
-                      child: pw.Text(
-                        '${i + 1}. ${tache.sousTaches![i].titre}',
-                        style: _bodyStyle.copyWith(
-                          fontSize: 10,
-                          color: tache.sousTaches![i].estCompletee
-                              ? PdfColors.grey600
-                              : PdfColors.black,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-        
-        if (tache.checklist != null && tache.checklist!.isNotEmpty) ...[
-          pw.SizedBox(height: 20),
-          
-          pw.Text(
-            'Checklist',
-            style: _subtitleStyle,
-          ),
-          
-          pw.SizedBox(height: 10),
-          
-          for (var item in tache.checklist!)
-            pw.Container(
-              margin: pw.EdgeInsets.only(bottom: 5),
-              child: pw.Row(
-                children: [
-                  pw.Text(
-                    '• ',
-                    style: _bodyStyle,
-                  ),
-                  pw.Expanded(
-                    child: pw.Text(
-                      item,
-                      style: _bodyStyle.copyWith(fontSize: 10),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
+        pw.SizedBox(height: 20),
       ],
     );
+  }
+  
+  // Contenu pour les pages de détails de tâches (MultiPage)
+  List<pw.Widget> _buildTacheDetailContent(Tache tache) {
+    final widgets = <pw.Widget>[];
+    
+    // Description
+    if (tache.description != null && tache.description!.isNotEmpty) {
+      widgets.add(
+        pw.Container(
+          margin: pw.EdgeInsets.only(bottom: 20),
+          padding: pw.EdgeInsets.all(12),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.grey300, width: 1),
+            borderRadius: pw.BorderRadius.circular(8),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'Description',
+                style: _subtitleStyle.copyWith(fontSize: 12),
+              ),
+              pw.SizedBox(height: 8),
+              pw.Text(
+                tache.description!,
+                style: _bodyStyle,
+                textAlign: pw.TextAlign.justify,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    // Sous-tâches
+    if (tache.sousTaches != null && tache.sousTaches!.isNotEmpty) {
+      widgets.add(
+        pw.Container(
+          margin: pw.EdgeInsets.only(bottom: 20),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'Sous-tâches (${tache.sousTaches!.length})',
+                style: _subtitleStyle,
+              ),
+              
+              pw.SizedBox(height: 10),
+              
+              for (var i = 0; i < tache.sousTaches!.length; i++)
+                pw.Container(
+                  margin: pw.EdgeInsets.only(bottom: 8),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey300, width: 1),
+                    borderRadius: pw.BorderRadius.circular(6),
+                  ),
+                  child: pw.Padding(
+                    padding: pw.EdgeInsets.all(10),
+                    child: pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        // Checkbox
+                        pw.Container(
+                          width: 14,
+                          height: 14,
+                          margin: pw.EdgeInsets.only(top: 2),
+                          decoration: pw.BoxDecoration(
+                            color: tache.sousTaches![i].estCompletee 
+                                ? PdfColors.grey800 
+                                : PdfColors.white,
+                            borderRadius: pw.BorderRadius.circular(3),
+                            border: pw.Border.all(
+                              color: PdfColors.grey600,
+                              width: 1,
+                            ),
+                          ),
+                          child: tache.sousTaches![i].estCompletee
+                              ? pw.Center(
+                                  child: pw.Text(
+                                    '✓',
+                                    style: pw.TextStyle(
+                                      fontSize: 8,
+                                      color: PdfColors.white,
+                                      fontWeight: pw.FontWeight.bold,
+                                    ),
+                                  ),
+                                )
+                              : null,
+                        ),
+                        
+                        pw.SizedBox(width: 12),
+                        
+                        // Contenu
+                        pw.Expanded(
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Text(
+                                '${i + 1}. ${tache.sousTaches![i].titre}',
+                                style: _bodyStyle.copyWith(
+                                  fontSize: 10,
+                                  fontWeight: pw.FontWeight.bold,
+                                  color: tache.sousTaches![i].estCompletee
+                                      ? PdfColors.grey600
+                                      : PdfColors.black,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    // Checklist
+    if (tache.checklist != null && tache.checklist!.isNotEmpty) {
+      widgets.add(
+        pw.Container(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'Checklist (${tache.checklist!.length} items)',
+                style: _subtitleStyle,
+              ),
+              
+              pw.SizedBox(height: 10),
+              
+              for (var i = 0; i < tache.checklist!.length; i++)
+                pw.Container(
+                  margin: pw.EdgeInsets.only(bottom: 6),
+                  child: pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Container(
+                        width: 14,
+                        height: 14,
+                        margin: pw.EdgeInsets.only(top: 1),
+                        decoration: pw.BoxDecoration(
+                          border: pw.Border.all(
+                            color: PdfColors.grey500,
+                            width: 1,
+                          ),
+                          borderRadius: pw.BorderRadius.circular(3),
+                        ),
+                      ),
+                      
+                      pw.SizedBox(width: 10),
+                      
+                      pw.Expanded(
+                        child: pw.Text(
+                          '${i + 1}. ${tache.checklist![i]}',
+                          style: _bodyStyle.copyWith(fontSize: 10),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    return widgets;
   }
   
   // ==================== MÉTHODES PRIVÉES INFORMATION ====================
@@ -737,216 +1093,89 @@ class PdfExportService {
     );
   }
   
-  Future<void> _addPointsPages(pw.Document pdf, Information info) async {
-    const maxPointsPerPage = 10; // Nombre maximum de points par page
-    final totalPages = (info.points.length / maxPointsPerPage).ceil();
-    
-    for (var pageIndex = 0; pageIndex < totalPages; pageIndex++) {
-      final startIndex = pageIndex * maxPointsPerPage;
-      final endIndex = (startIndex + maxPointsPerPage) < info.points.length 
-          ? startIndex + maxPointsPerPage 
-          : info.points.length;
-      
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          margin: pw.EdgeInsets.all(30),
-          build: (pw.Context context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                // En-tête avec pagination
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      'Points clés',
-                      style: _headerStyle.copyWith(color: PdfColors.black),
-                    ),
-                    if (totalPages > 1)
-                      pw.Text(
-                        'Page ${pageIndex + 1}/$totalPages',
-                        style: _smallStyle,
-                      ),
-                  ],
-                ),
-                
-                pw.SizedBox(height: 5),
-                
-                pw.Text(
-                  '${info.points.length} point${info.points.length > 1 ? 's' : ''} documenté${info.points.length > 1 ? 's' : ''}',
-                  style: _smallStyle,
-                ),
-                
-                pw.SizedBox(height: 25),
-                
-                // Liste des points pour cette page
-                for (var i = startIndex; i < endIndex; i++)
-                  _buildPointItem(info.points[i], i + 1),
-              ],
-            );
-          },
-        ),
-      );
-    }
-  }
-  
-  pw.Widget _buildPointItem(String point, int numero) {
-    return pw.Container(
-      margin: pw.EdgeInsets.only(bottom: 15),
-      child: pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          // Numéro
-          pw.Container(
-            width: 22,
-            height: 22,
-            decoration: pw.BoxDecoration(
-              border: pw.Border.all(color: PdfColors.black, width: 1),
-              borderRadius: pw.BorderRadius.circular(11),
-            ),
-            child: pw.Center(
-              child: pw.Text(
-                '$numero',
-                style: pw.TextStyle(
-                  fontSize: 10,
-                  color: PdfColors.black,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-          
-          pw.SizedBox(width: 12),
-          
-          // Contenu
-          pw.Expanded(
-            child: pw.Container(
-              padding: pw.EdgeInsets.all(12),
-              decoration: pw.BoxDecoration(
-                border: pw.Border.all(color: PdfColors.grey300, width: 1),
-                borderRadius: pw.BorderRadius.circular(8),
-              ),
-              child: pw.Text(
-                point,
-                style: _bodyStyle.copyWith(
-                  color: PdfColors.grey800,
-                ),
-                textAlign: pw.TextAlign.justify,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  // ==================== MÉTHODES POUR IMAGES ====================
-  
-  Future<void> _addImagesPages(pw.Document pdf, List<String> imagePaths, {String? title}) async {
-    const maxImagesPerPage = 2; // Nombre maximum d'images par page
-    final totalPages = (imagePaths.length / maxImagesPerPage).ceil();
-    
-    for (var pageIndex = 0; pageIndex < totalPages; pageIndex++) {
-      final startIndex = pageIndex * maxImagesPerPage;
-      final endIndex = (startIndex + maxImagesPerPage) < imagePaths.length 
-          ? startIndex + maxImagesPerPage 
-          : imagePaths.length;
-      
-      // Charger toutes les images pour cette page
-      final pageImages = imagePaths.sublist(startIndex, endIndex);
-      final imageBytesList = await _loadImagesForPage(pageImages);
-      
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          margin: pw.EdgeInsets.all(30),
-          build: (pw.Context context) {
-            return _buildImagesPage(
-              imageBytesList,
-              pageImages,
-              startIndex,
-              title: title,
-              pageIndex: pageIndex,
-              totalPages: totalPages,
-            );
-          },
-        ),
-      );
-    }
-  }
-  
-  pw.Widget _buildImagesPage(
-    List<Uint8List> imageBytesList, 
-    List<String> imagePaths, 
-    int startIndex,
-    {String? title, int pageIndex = 0, int totalPages = 1}
-  ) {
-    final children = <pw.Widget>[];
-    
-    // En-tête avec pagination
-    if (title != null) {
-      children.add(
+  // En-tête pour les pages de points
+  pw.Widget _buildPointsHeader(Information info, int pageNumber, int totalPages) {
+    return pw.Column(
+      children: [
         pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
             pw.Text(
-              title,
-              style: _headerStyle,
+              'Points clés',
+              style: _headerStyle.copyWith(fontSize: 18),
             ),
             if (totalPages > 1)
               pw.Text(
-                'Page ${pageIndex + 1}/$totalPages',
+                'Page $pageNumber/$totalPages',
                 style: _smallStyle,
               ),
           ],
         ),
-      );
-      
-      children.add(pw.SizedBox(height: 10));
-      
-      children.add(
+        
+        pw.SizedBox(height: 5),
+        
         pw.Text(
-          '${imagePaths.length} image(s) - ${startIndex + 1} à ${startIndex + imagePaths.length}',
+          '${info.points.length} point${info.points.length > 1 ? 's' : ''} documenté${info.points.length > 1 ? 's' : ''}',
           style: _smallStyle,
         ),
-      );
-      
-      children.add(pw.SizedBox(height: 25));
-    }
+        
+        pw.SizedBox(height: 20),
+      ],
+    );
+  }
+  
+  // Contenu pour les pages de points (MultiPage)
+  List<pw.Widget> _buildPointsContent(Information info) {
+    final widgets = <pw.Widget>[];
     
-    // Ajouter les images
-    for (var i = 0; i < imageBytesList.length; i++) {
-      final imageBytes = imageBytesList[i];
-      final imageNumber = startIndex + i + 1;
+    for (var i = 0; i < info.points.length; i++) {
+      final point = info.points[i];
+      final numero = i + 1;
       
-      children.add(
+      widgets.add(
         pw.Container(
-          margin: pw.EdgeInsets.only(bottom: 30),
-          width: double.infinity,
-          child: pw.Column(
-            mainAxisAlignment: pw.MainAxisAlignment.center,
+          margin: pw.EdgeInsets.only(bottom: 15),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // L'image elle-même
+              // Numéro
               pw.Container(
-                height: 250,
-                child: pw.Image(
-                  pw.MemoryImage(imageBytes),
-                  fit: pw.BoxFit.contain,
+                width: 22,
+                height: 22,
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.black, width: 1),
+                  borderRadius: pw.BorderRadius.circular(11),
+                ),
+                child: pw.Center(
+                  child: pw.Text(
+                    '$numero',
+                    style: pw.TextStyle(
+                      fontSize: 10,
+                      color: PdfColors.black,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
               
-              // Légende
-              pw.Padding(
-                padding: pw.EdgeInsets.all(10),
-                child: pw.Column(
-                  children: [
-                    pw.Text(
-                      'Image $imageNumber',
-                      style: _smallStyle.copyWith(fontWeight: pw.FontWeight.bold),
+              pw.SizedBox(width: 12),
+              
+              // Contenu
+              pw.Expanded(
+                child: pw.Container(
+                  padding: pw.EdgeInsets.all(12),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey300, width: 1),
+                    borderRadius: pw.BorderRadius.circular(8),
+                    color: PdfColors.grey50,
+                  ),
+                  child: pw.Text(
+                    point,
+                    style: _bodyStyle.copyWith(
+                      color: PdfColors.grey800,
                     ),
-                    pw.SizedBox(height: 5),
-                  ],
+                    textAlign: pw.TextAlign.justify,
+                  ),
                 ),
               ),
             ],
@@ -954,63 +1183,147 @@ class PdfExportService {
         ),
       );
       
-      // Ajouter un espace entre les images (sauf pour la dernière)
-      if (i < imageBytesList.length - 1) {
-        children.add(pw.SizedBox(height: 20));
+      // Ajouter un espace entre les points (sauf pour le dernier)
+      if (i < info.points.length - 1) {
+        widgets.add(pw.SizedBox(height: 10));
       }
     }
     
+    return widgets;
+  }
+  
+  // ==================== MÉTHODES POUR IMAGES (MULTIPAGE) ====================
+  
+  // En-tête pour les pages d'images
+  pw.Widget _buildImagesHeader(String title, int totalImages, int pageNumber, int totalPages) {
     return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: children,
-    );
-  }
-  
-  Future<List<Uint8List>> _loadImagesForPage(List<String> imagePaths) async {
-    final List<Uint8List> imageBytesList = [];
-    
-    for (final imagePath in imagePaths) {
-      try {
-        final imageBytes = await _getImageBytes(imagePath);
-        imageBytesList.add(imageBytes);
-      } catch (e) {
-        print('Erreur de chargement de l\'image $imagePath: $e');
-        // Ajouter un placeholder en cas d'erreur
-        imageBytesList.add(_createImagePlaceholder('Erreur de chargement: ${path.basename(imagePath)}'));
-      }
-    }
-    
-    return imageBytesList;
-  }
-  
-  // ==================== MÉTHODES UTILITAIRES ====================
-  
-  pw.TableRow _buildTableRow(String label, String value, {bool isBold = false}) {
-    return pw.TableRow(
       children: [
-        pw.Padding(
-          padding: pw.EdgeInsets.all(10),
-          child: pw.Text(
-            label,
-            style: _tableCellStyle.copyWith(
-              fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              title,
+              style: _headerStyle.copyWith(fontSize: 18),
             ),
-            textAlign: pw.TextAlign.left,
-          ),
+            if (totalPages > 1)
+              pw.Text(
+                'Page $pageNumber/$totalPages',
+                style: _smallStyle,
+              ),
+          ],
         ),
-        pw.Padding(
-          padding: pw.EdgeInsets.all(10),
-          child: pw.Text(
-            value,
-            style: _tableCellStyle.copyWith(
-              fontWeight: pw.FontWeight.bold,
-            ),
-            textAlign: pw.TextAlign.right,
-          ),
+        
+        pw.SizedBox(height: 5),
+        
+        pw.Text(
+          '$totalImages image${totalImages > 1 ? 's' : ''}',
+          style: _smallStyle,
         ),
+        
+        pw.SizedBox(height: 20),
       ],
     );
   }
+  
+  // Contenu pour les pages d'images (MultiPage) - LISTE DES IMAGES
+  List<pw.Widget> _buildImagesListContent(List<String> imagePaths) {
+    final widgets = <pw.Widget>[];
+    
+    widgets.add(
+      pw.Text(
+        'Liste des images (${imagePaths.length}):',
+        style: pw.TextStyle(
+          fontSize: 12,
+          fontWeight: pw.FontWeight.bold,
+        ),
+      ),
+    );
+    
+    widgets.add(pw.SizedBox(height: 20));
+    
+    for (var i = 0; i < imagePaths.length; i++) {
+      final imagePath = imagePaths[i];
+      final imageNumber = i + 1;
+      
+      widgets.add(
+        pw.Container(
+          margin: pw.EdgeInsets.only(bottom: 15),
+          padding: pw.EdgeInsets.all(10),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.grey300, width: 1),
+            borderRadius: pw.BorderRadius.circular(8),
+            color: PdfColors.grey50,
+          ),
+          child: pw.Row(
+            children: [
+              pw.Container(
+                width: 30,
+                height: 30,
+                decoration: pw.BoxDecoration(
+                  color: primaryColor,
+                  borderRadius: pw.BorderRadius.circular(15),
+                ),
+                child: pw.Center(
+                  child: pw.Text(
+                    '$imageNumber',
+                    style: pw.TextStyle(
+                      fontSize: 12,
+                      color: PdfColors.white,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              
+              pw.SizedBox(width: 15),
+              
+              pw.Expanded(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'Image $imageNumber',
+                      style: _smallStyle.copyWith(
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.black,
+                      ),
+                    ),
+                    pw.Text(
+                      path.basename(imagePath),
+                      style: _smallStyle.copyWith(
+                        color: PdfColors.grey600,
+                        fontStyle: pw.FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
+    return widgets;
+  }
+  
+  // ==================== FOOTER POUR TOUTES LES PAGES ====================
+  
+  pw.Widget _buildPageFooter(pw.Context context) {
+    return pw.Container(
+      alignment: pw.Alignment.centerRight,
+      margin: pw.EdgeInsets.only(top: 20),
+      child: pw.Text(
+        'Page ${context.pageNumber} sur ${context.pagesCount}',
+        style: _smallStyle.copyWith(
+          color: PdfColors.grey500,
+          fontStyle: pw.FontStyle.italic,
+        ),
+      ),
+    );
+  }
+  
+  // ==================== MÉTHODES UTILITAIRES ====================
   
   PdfColor _getStatusColorPdf(String statut) {
     switch (statut) {
@@ -1076,7 +1389,7 @@ class PdfExportService {
       if (await imageFile.exists()) {
         print('✅ Fichier image existe');
         
-        // Charger depuis le système de fichiers - COMME DANS VOTRE ANCIEN CODE
+        // Charger depuis le système de fichiers
         final Uint8List imageBytes = await imageFile.readAsBytes();
         print('✅ Image chargée avec succès: ${imageBytes.length} bytes');
         
@@ -1163,4 +1476,7 @@ class PdfExportService {
       name: title,
     );
   }
+  
+  // Ajout de la couleur primaire manquante
+  static final PdfColor primaryColor = PdfColor.fromInt(0xFF3498DB);
 }
