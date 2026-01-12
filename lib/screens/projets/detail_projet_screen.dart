@@ -12,6 +12,10 @@ import 'package:jprojets/screens/projets/tache_detail_screen.dart';
 import 'package:jprojets/services/database_service.dart';
 import 'package:jprojets/widgets/link_actions_bottom_sheet.dart';
 import 'package:jprojets/widgets/tache_widget.dart';
+import 'package:intl/intl.dart';
+import 'package:path/path.dart' as path;
+import 'package:share_plus/share_plus.dart';
+import 'package:printing/printing.dart';
 
 class DetailProjetScreen extends StatefulWidget {
   final DatabaseService databaseService;
@@ -30,17 +34,315 @@ class DetailProjetScreen extends StatefulWidget {
 class _DetailProjetScreenState extends State<DetailProjetScreen> {
   late Projet? _projet;
   bool _isExporting = false;
+  List<Map<String, dynamic>> _pdfList = [];
   
   @override
   void initState() {
     super.initState();
     _chargerProjet();
+    _chargerPdfsAssocies();
   }
   
   void _chargerProjet() {
     setState(() {
       _projet = widget.databaseService.getProjetParId(widget.projetId);
     });
+  }
+  
+  Future<void> _chargerPdfsAssocies() async {
+    if (_projet == null) return;
+    
+    // Obtenir tous les PDFs et filtrer ceux qui sont associés à ce projet
+    final tousPdf = await widget.databaseService.getListeTousPdf();
+    final pdfAssocies = tousPdf.where((pdf) {
+      // Vérifier d'abord si c'est un PDF de projet
+      if (pdf['type'] != 'projet') return false;
+      
+      // 1. Essayer de matcher par nom de fichier
+      final pdfFileName = pdf['display_name']?.toString().toLowerCase() ?? '';
+      final projetTitre = _projet!.titre.toLowerCase();
+      
+      // Logique de matching plus flexible
+      final titreSansAccents = _removeAccents(projetTitre);
+      final pdfSansAccents = _removeAccents(pdfFileName);
+      
+      // Remplacer les espaces et caractères spéciaux par underscores
+      final titreSansAccentsUnderscore = titreSansAccents.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+      
+      // Recherche par différentes variations
+      final variations = [
+        projetTitre,
+        projetTitre.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_'),
+        projetTitre.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '-'),
+        titreSansAccents,
+        titreSansAccentsUnderscore,
+        titreSansAccents.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '-'),
+        titreSansAccentsUnderscore.replaceAll('__', '_'),
+        titreSansAccentsUnderscore.replaceAll('___', '_'),
+      ];
+      
+      // Normaliser aussi le nom du PDF
+      final pdfNormalise = pdfSansAccents.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+      
+      // Vérifier si le nom du PDF contient une des variations
+      for (final variation in variations) {
+        final variationClean = variation.toLowerCase().trim();
+        if (variationClean.isEmpty) continue;
+        
+        if (pdfNormalise.contains(variationClean)) {
+          return true;
+        }
+      }
+      
+      // Vérifier si le nom du fichier contient l'ID du projet
+      final projetId = widget.projetId.toLowerCase();
+      if (pdfFileName.contains(projetId) || pdfSansAccents.contains(projetId)) {
+        return true;
+      }
+      
+      return false;
+    }).toList();
+    
+    setState(() {
+      _pdfList = pdfAssocies;
+    });
+  }
+  
+  String _removeAccents(String str) {
+    var withAccents = 'ÀÁÂÃÄÅàáâãäåÒÓÔÕÖØòóôõöøÈÉÊËèéêëÇçÌÍÎÏìíîïÙÚÛÜùúûüÿÑñ';
+    var withoutAccents = 'AAAAAAaaaaaaOOOOOOooooooEEEEeeeeCcIIIIiiiiUUUUuuuuyNn';
+    
+    String result = str;
+    for (int i = 0; i < withAccents.length; i++) {
+      result = result.replaceAll(withAccents[i], withoutAccents[i]);
+    }
+    result = result.replaceAll("'", '').replaceAll('"', '');
+    return result;
+  }
+  
+  Future<void> _supprimerPdf(String filePath, String fileName) async {
+    final confirm = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Supprimer le PDF'),
+        content: Text('Êtes-vous sûr de vouloir supprimer "$fileName" ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Supprimer', style: TextStyle(color: AppTheme.error)),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirm == true) {
+      final success = await widget.databaseService.supprimerPdf(filePath);
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('PDF "$fileName" supprimé'),
+            backgroundColor: AppTheme.success,
+          ),
+        );
+        _chargerPdfsAssocies();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Erreur lors de la suppression'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    }
+  }
+  
+  Future<void> _previsualiserPdf(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Fichier PDF non trouvé'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+        return;
+      }
+      
+      final pdfBytes = await file.readAsBytes();
+      await Printing.layoutPdf(
+        onLayout: (format) => pdfBytes,
+        name: path.basename(filePath),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erreur de prévisualisation: $e'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    }
+  }
+  
+  Future<void> _partagerPdf(String filePath, String fileName) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Fichier PDF non trouvé'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+        return;
+      }
+      
+      await Share.shareXFiles(
+        [XFile(filePath)],
+        subject: 'PDF Projet: $fileName',
+        text: 'Voici le PDF du projet "${_projet?.titre}" généré par JProjets',
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erreur de partage: $e'),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    }
+  }
+  
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+  
+  String _formatDatePdf(DateTime date) {
+    return DateFormat('dd/MM/yyyy HH:mm').format(date);
+  }
+  
+  Widget _buildPdfCard(Map<String, dynamic> pdf) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+      ),
+      elevation: 2,
+      child: InkWell(
+        onTap: () => _previsualiserPdf(pdf['path']),
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Icône PDF
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.error.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.picture_as_pdf,
+                  color: AppTheme.error,
+                  size: 20,
+                ),
+              ),
+              
+              const SizedBox(width: 12),
+              
+              // Détails du PDF
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pdf['display_name'],
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[900],
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    
+                    const SizedBox(height: 4),
+                    
+                    Text(
+                      '${_formatSize(pdf['size'])} • ${_formatDatePdf(pdf['date'])}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              const SizedBox(width: 8),
+              
+              // Menu d'options
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'preview') {
+                    _previsualiserPdf(pdf['path']);
+                  } else if (value == 'share') {
+                    _partagerPdf(pdf['path'], pdf['display_name']);
+                  } else if (value == 'delete') {
+                    _supprimerPdf(pdf['path'], pdf['display_name']);
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'preview',
+                    child: Row(
+                      children: [
+                        Icon(Icons.remove_red_eye, size: 18),
+                        SizedBox(width: 8),
+                        Text('Prévisualiser'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'share',
+                    child: Row(
+                      children: [
+                        Icon(Icons.share, size: 18),
+                        SizedBox(width: 8),
+                        Text('Partager'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, color: AppTheme.error),
+                        SizedBox(width: 8),
+                        Text('Supprimer'),
+                      ],
+                    ),
+                  ),
+                ],
+                icon: Icon(
+                  Icons.more_vert,
+                  color: Colors.grey[600],
+                  size: 20,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
   
   Future<void> _supprimerProjet() async {
@@ -185,78 +487,69 @@ class _DetailProjetScreenState extends State<DetailProjetScreen> {
   }
   
   Future<void> _exporterEnPdf() async {
-  if (_projet == null) return;
-  
-  try {
-    // Créer une instance du service PDF
-    final pdfService = PdfExportService();
+    if (_projet == null) return;
     
-    // Afficher un loader
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
-    
-    // Générer le PDF
-    final pdfBytes = await pdfService.generateProjetPdf(_projet!);
-    
-    // Fermer le loader
-    Navigator.pop(context);
-    
-    // Demander à l'utilisateur ce qu'il veut faire
-    final action = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('PDF généré'),
-        content: const Text('Que souhaitez-vous faire avec le PDF ?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, 'preview'),
-            child: const Text('Prévisualiser'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, 'share'),
-            child: const Text('Partager'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, 'cancel'),
-            child: const Text('Annuler'),
-          ),
-        ],
-      ),
-    );
-    
-    if (action == 'preview') {
-      // Prévisualiser
-      await pdfService.previewPdf(pdfBytes, _projet!.titre);
-    } else if (action == 'share') {
-      // Sauvegarder et partager
-      final fileName = 'projet_${_projet!.titre.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}_${DateTime.now().millisecondsSinceEpoch}.pdf';
-      final filePath = await pdfService.savePdfLocally(pdfBytes, fileName);
+    try {
+      final pdfService = PdfExportService();
       
-      // Partager
-      await pdfService.sharePdf(filePath, 'Projet: ${_projet!.titre}');
-    }
-    
-  } catch (e) {
-    // Fermer le loader si encore ouvert
-    if (Navigator.canPop(context)) Navigator.pop(context);
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Erreur lors de la génération du PDF: $e'),
-        backgroundColor: AppTheme.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
         ),
-      ),
-    );
+      );
+      
+      final pdfBytes = await pdfService.generateProjetPdf(_projet!);
+      
+      Navigator.pop(context);
+      
+      final action = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('PDF généré'),
+          content: const Text('Que souhaitez-vous faire avec le PDF ?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'preview'),
+              child: const Text('Prévisualiser'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'share'),
+              child: const Text('Partager'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'cancel'),
+              child: const Text('Annuler'),
+            ),
+          ],
+        ),
+      );
+      
+      if (action == 'preview') {
+        await pdfService.previewPdf(pdfBytes, _projet!.titre);
+      } else if (action == 'share') {
+        final fileName = 'projet_${_projet!.titre.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+        final filePath = await pdfService.savePdfLocally(pdfBytes, fileName);
+        
+        await pdfService.sharePdf(filePath, 'Projet: ${_projet!.titre}');
+      }
+      
+    } catch (e) {
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erreur lors de la génération du PDF: $e'),
+          backgroundColor: AppTheme.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+    }
   }
-}
 
   void _showLinkOptions(BuildContext context, String url) {
     showModalBottomSheet(
@@ -352,7 +645,6 @@ class _DetailProjetScreenState extends State<DetailProjetScreen> {
                 ),
               ),
             ),
-            // Navigation entre les images
             if (_projet!.images!.length > 1) ...[
               Positioned(
                 left: 10,
@@ -563,7 +855,10 @@ class _DetailProjetScreenState extends State<DetailProjetScreen> {
                                               projetId: widget.projetId,
                                             ),
                                           ),
-                                        ).then((_) => _chargerProjet());
+                                        ).then((_) {
+                                          _chargerProjet();
+                                          _chargerPdfsAssocies();
+                                        });
                                       },
                                       tooltip: 'Modifier',
                                     ),
@@ -660,7 +955,75 @@ class _DetailProjetScreenState extends State<DetailProjetScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // En-tête avec statut et date
+                      // Section PDFs Associés (JUSTE AVANT LE STATUT)
+                      if (_pdfList.isNotEmpty) ...[
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'PDFs Générés (${_pdfList.length})',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey[800],
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primary.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.picture_as_pdf,
+                                          color: AppTheme.primary,
+                                          size: 14,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${_pdfList.length} fichier${_pdfList.length > 1 ? 's' : ''}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                            color: AppTheme.primary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              
+                              const SizedBox(height: 12),
+                              
+                              Column(
+                                children: _pdfList.map((pdf) => _buildPdfCard(pdf)).toList(),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      
+                      // En-tête avec statut et date (MAINTENANT APRÈS LES PDFs)
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -716,6 +1079,7 @@ class _DetailProjetScreenState extends State<DetailProjetScreen> {
                         ),
                       ),
                       
+                      // Le reste du contenu reste inchangé...
                       // Barre de progression
                       const SizedBox(height: 24),
                       
@@ -1098,6 +1462,7 @@ class _DetailProjetScreenState extends State<DetailProjetScreen> {
     return '${date.day}/${date.month}/${date.year}';
   }
 }
+
 
 class AddTacheDialog extends StatefulWidget {
   final String projetId;

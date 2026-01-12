@@ -112,26 +112,6 @@ class PdfExportService {
     
     // Page avec la liste des images (MultiPage pour la liste)
     if (projet.images != null && projet.images!.isNotEmpty) {
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: pw.EdgeInsets.all(30),
-          header: (pw.Context context) {
-            return _buildImagesHeader(
-              'Images du projet',
-              projet.images!.length,
-              context.pageNumber,
-              context.pagesCount
-            );
-          },
-          build: (pw.Context context) {
-            return _buildImagesListContent(projet.images!);
-          },
-          footer: (pw.Context context) {
-            return _buildPageFooter(context);
-          },
-        ),
-      );
       
       // Pages séparées pour chaque image (Page simple, pas MultiPage)
       for (int i = 0; i < projet.images!.length; i++) {
@@ -266,26 +246,6 @@ class PdfExportService {
     
     // Page avec la liste des images (MultiPage pour la liste)
     if (info.images != null && info.images!.isNotEmpty) {
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: pw.EdgeInsets.all(30),
-          header: (pw.Context context) {
-            return _buildImagesHeader(
-              'Images de l\'information',
-              info.images!.length,
-              context.pageNumber,
-              context.pagesCount
-            );
-          },
-          build: (pw.Context context) {
-            return _buildImagesListContent(info.images!);
-          },
-          footer: (pw.Context context) {
-            return _buildPageFooter(context);
-          },
-        ),
-      );
       
       // Pages séparées pour chaque image (Page simple, pas MultiPage)
       for (int i = 0; i < info.images!.length; i++) {

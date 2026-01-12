@@ -7,6 +7,8 @@ import 'package:jprojets/models/projet.dart';
 import 'package:jprojets/models/sous_tache.dart';
 import 'package:jprojets/models/tache.dart';
 import 'package:jprojets/models/user.dart';
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 
 /// Service principal pour gérer toutes les opérations de la base de données Hive
 class DatabaseService {
@@ -1263,6 +1265,77 @@ Future<Information> _creerInformationDepuisMap(Map<String, dynamic> data) async 
       points: List<String>.from(data['points']),
       images: List<String>.from(data['images'] ?? []),
     );
+  }
+}
+
+
+/// Récupère tous les PDF (projets + informations)
+Future<List<Map<String, dynamic>>> getListeTousPdf() async {
+  try {
+    final directory = await getApplicationDocumentsDirectory();
+    final files = directory.listSync();
+    
+    final List<Map<String, dynamic>> pdfList = [];
+    
+    for (final file in files) {
+      if (file.path.toLowerCase().endsWith('.pdf')) {
+        final fileName = path.basename(file.path);
+        final fileStat = file.statSync();
+        
+        String type = 'autre';
+        String nom = fileName;
+        
+        // Déterminer le type de PDF
+        if (fileName.startsWith('projet_')) {
+          type = 'projet';
+          final regex = RegExp(r'projet_(.*?)_(\d+)\.pdf');
+          final match = regex.firstMatch(fileName);
+          if (match != null && match.groupCount >= 1) {
+            nom = match.group(1)!.replaceAll('_', ' ');
+          }
+        } else if (fileName.startsWith('information_')) {
+          type = 'information';
+          final regex = RegExp(r'information_(.*?)_(\d+)\.pdf');
+          final match = regex.firstMatch(fileName);
+          if (match != null && match.groupCount >= 1) {
+            nom = match.group(1)!.replaceAll('_', ' ');
+          }
+        }
+        
+        pdfList.add({
+          'path': file.path,
+          'name': fileName,
+          'display_name': nom,
+          'type': type,
+          'size': fileStat.size,
+          'date': fileStat.modified,
+          'file': file,
+        });
+      }
+    }
+    
+    // Trier par date (du plus récent au plus ancien)
+    pdfList.sort((a, b) => b['date'].compareTo(a['date']));
+    
+    return pdfList;
+  } catch (e) {
+    print('Erreur liste PDF: $e');
+    return [];
+  }
+}
+
+/// Supprime un fichier PDF
+Future<bool> supprimerPdf(String filePath) async {
+  try {
+    final file = File(filePath);
+    if (await file.exists()) {
+      await file.delete();
+      return true;
+    }
+    return false;
+  } catch (e) {
+    print('Erreur suppression PDF: $e');
+    return false;
   }
 }
 

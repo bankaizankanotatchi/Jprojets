@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:jprojets/screens/informations/bibliotheque_pdf_informations_screen.dart';
 import 'package:jprojets/theme/app_theme.dart';
 import 'package:jprojets/models/information.dart';
 import 'package:jprojets/screens/informations/create_information_screen.dart';
@@ -863,34 +864,69 @@ class _ListInformationsScreenState extends State<ListInformationsScreen> with Wi
                           }).toList(),
                         ),
                       
-                      const SizedBox(height: 80),
+                      const SizedBox(height: 160),
                     ],
                   ),
                 ),
               ),
             ],
           ),
-          
-          floatingActionButton: Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            child: FloatingActionButton(
-              onPressed: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => CreateInformationScreen(databaseService: widget.databaseService),
+
+          floatingActionButton: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // FAB Bibliothèque PDF Informations (en rouge)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16, right: 16),
+                child: FloatingActionButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => BibliothequePdfInformationsScreen(
+                          databaseService: widget.databaseService,
+                        ),
+                      ),
+                    );
+                  },
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                );
-                _chargerInformations();
-              },
-              backgroundColor: AppTheme.secondary,
-              foregroundColor: Colors.white,
-              elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                  heroTag: 'pdf_infos_library',
+                  child: const Icon(Icons.picture_as_pdf),
+                ),
               ),
-              child: const Icon(Icons.add),
-            ),
+              
+              // FAB Créer information (existant, en secondary)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16, right: 16),
+                child: FloatingActionButton(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => CreateInformationScreen(
+                          databaseService: widget.databaseService,
+                        ),
+                      ),
+                    );
+                    _chargerInformations();
+                  },
+                  backgroundColor: AppTheme.secondary,
+                  foregroundColor: Colors.white,
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  heroTag: 'create_info',
+                  child: const Icon(Icons.add),
+                ),
+              ),
+            ],
           ),
           floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
         ),

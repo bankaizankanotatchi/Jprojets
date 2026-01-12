@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:jprojets/screens/projets/bibliotheque_pdf_projet_screen.dart';
 import 'package:jprojets/screens/projets/edit_projet_screen.dart';
 import 'package:jprojets/theme/app_theme.dart';
 import 'package:jprojets/models/projet.dart';
@@ -661,36 +662,70 @@ class _ListProjetsScreenState extends State<ListProjetsScreen> with WidgetsBindi
                           }).toList(),
                         ),
                       
-                      const SizedBox(height: 80),
+                      const SizedBox(height: 160),
                     ],
                   ),
                 ),
               ),
             ],
           ),
-          
-          floatingActionButton: Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            child: FloatingActionButton(
-              onPressed: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => CreateProjetScreen(
-                      databaseService: widget.databaseService,
-                    ),
+
+          // Premier FAB (créer projet)
+          floatingActionButton: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // FAB Bibliothèque PDF
+              Container(
+                margin: const EdgeInsets.only(bottom: 16, right: 16),
+                child: FloatingActionButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => BibliothequePdfProjetsScreen(
+                          databaseService: widget.databaseService,
+                        ),
+                      ),
+                    );
+                  },
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                );
-                _chargerProjets();
-              },
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                  heroTag: 'pdf_library',
+                  child: const Icon(Icons.picture_as_pdf),
+                ),
               ),
-              child: const Icon(Icons.add),
-            ),
+              
+              // FAB Créer projet (existant)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16, right: 16),
+                child: FloatingActionButton(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => CreateProjetScreen(
+                          databaseService: widget.databaseService,
+                        ),
+                      ),
+                    );
+                    _chargerProjets();
+                  },
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  heroTag: 'create_project',
+                  child: const Icon(Icons.add),
+                ),
+              ),
+            ],
           ),
           floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
         ),
